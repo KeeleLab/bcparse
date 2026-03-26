@@ -3,14 +3,118 @@
 """
 Name:       parse_fastq.py
 Author:     CAG
-Version:    1.5
-Date:       2026/03/03
+Version:    2.0
+Date:       2026/03/24
 """
 
 # %% Imports
 
+import gzip
 import regex
-import numpy as np
+from tqdm import tqdm
+from typing import Generator, Tuple
+
+# %% Streaming functions
+
+def stream_fastq(file_path: str) -> Generator[Tuple[str, str, str, str], None, None]:
+    """
+    Iteratively stream fq or fq.gz entries into memory as 4-line string.
+    Shows an indeterminate tqdm progress bar (no pre-counting).
+    """
+    gz = file_path.endswith(".gz")
+
+    if gz:
+        # Buffer the underlying fileobj; gzip itself then reads bigger chunks
+        raw = open(file_path, "rb", buffering=1024 * 1024)
+        fh = gzip.open(raw, "rt", newline="")
+    else:
+        fh = open(file_path, "rt", buffering=1024 * 1024, newline="")
+
+    with fh as fastq_file, tqdm(desc="Counting index/barcode pairs", unit="rec", ascii="-=") as pbar:
+        it = iter(fastq_file)
+        update_every = 1024
+        n = 0
+
+        while True:
+            h = next(it, None)
+            if h is None:
+                break
+            s = next(it)
+            p = next(it)
+            q = next(it)
+
+            # cheaper than .strip(); we only want to drop newline
+            yield h.rstrip("\n"), s.rstrip("\n"), p.rstrip("\n"), q.rstrip("\n")
+
+            n += 1
+            if n % update_every == 0:
+                pbar.update(update_every)
+
+        # flush remainder
+        rem = n % update_every
+        if rem:
+            pbar.update(rem)
+
+
+def process_fastq_stream(settings: dict):
+    """
+    Use stream_fastq() and parse_fastq_rec class to collect {idx:{bc:count}}
+    """
+    res_pfq = {}
+
+    # Initialize search patterns
+    parse_fastq_rec.init_patterns(settings)
+
+    for _, seq, _, qual in stream_fastq(settings["sample_path"]):
+        res = parse_fastq_rec(
+            seq=seq,
+            qual=qual,
+            settings=settings,
+        )
+
+        # Ignore read if barcode is missing or low mean q
+        if not hasattr(res, "bc_seq") or res.bc_qual < settings["mean_qual"]:
+            continue
+
+        # Process p5 - skip if missing or low mean q
+        if not (hasattr(res, "p5_seq") and hasattr(res, "p5_qual")):
+            continue
+
+        p5_seq = res.p5_seq if res.p5_qual >= settings["mean_qual"] else None
+        if p5_seq is None:
+            continue
+
+        # Optionally process p7, fill instead of skip:
+        # Ns where q<mask_qual, or all Ns if mean q<min_qual, X if missing
+        p7_seq = ""
+
+        if settings["dualindex"]:
+            if hasattr(res, "p7_seq") and hasattr(res, "p7_qual"):
+                p7_seq = res.p7_seq if res.p7_qual >= settings["mean_qual"] else "N" * settings["tlen_p7"]
+            else:
+                p7_seq = "X" * settings["tlen_p7"]
+
+        idx_seq = p5_seq + p7_seq
+
+        if idx_seq not in res_pfq:
+            res_pfq[idx_seq] = {}
+
+        if res.bc_seq not in res_pfq[idx_seq]:
+            res_pfq[idx_seq][res.bc_seq] = 0
+
+        res_pfq[idx_seq][res.bc_seq] += 1
+
+    return res_pfq
+
+
+# %% Helpers
+
+def mean_q(quals: list[int]) -> float:
+    """
+    Tiny hot-path helper: avoid NumPy overhead on short per-read quality slices.
+    """
+    return 0.0 if not quals else sum(quals) / len(quals)
+
 
 # %% Class definition
 
@@ -19,6 +123,17 @@ class parse_fastq_rec(object):
     Class to handle each fastq record as an instance while it streams.
     Return per-read idx (named if expected), bc, and assoc mean qualities.
     """
+
+    __slots__ = (
+        "seq",
+        "qual",
+        "p5_seq",
+        "p5_qual",
+        "bc_seq",
+        "bc_qual",
+        "p7_seq",
+        "p7_qual",
+    )
 
     # Class-level constants — built once, shared globally
     _RC_TABLE = None
@@ -70,9 +185,6 @@ class parse_fastq_rec(object):
         # Process the fastq record according to settings
         self.process_sequence(settings)
 
-        # Get read mean qual
-        self.read_q = np.mean(self.qual)
-
     def process_sequence(self, settings):
         """
         Extract regions of interest and assoc. quality strings and update class attrs.
@@ -93,7 +205,7 @@ class parse_fastq_rec(object):
 
         # If p5 found, set attrs and continue
         if p5[0]:
-            self.p5_seq, self.p5_qual = p5[0], np.mean(p5[1])
+            self.p5_seq, self.p5_qual = p5[0], mean_q(p5[1])
 
             # Reverse complement if called
             if settings["rdir"] == "rev":
@@ -120,7 +232,7 @@ class parse_fastq_rec(object):
             )
 
         if bc[0]:
-            self.bc_seq, self.bc_qual = bc[0], np.mean(bc[1])
+            self.bc_seq, self.bc_qual = bc[0], mean_q(bc[1])
 
     def process_dual_index(self, settings):
         """
@@ -144,7 +256,7 @@ class parse_fastq_rec(object):
             return
         
         # If found, set attrs and continue
-        self.p7_seq, self.p7_qual = p7[0], np.mean(p7[1])
+        self.p7_seq, self.p7_qual = p7[0], mean_q(p7[1])
 
         # Finish based on di_profile
         # Extract barcode for dual index:
@@ -172,7 +284,7 @@ class parse_fastq_rec(object):
                 )
 
         if bc[0]:
-            self.bc_seq, self.bc_qual = bc[0], np.mean(bc[1])
+            self.bc_seq, self.bc_qual = bc[0], mean_q(bc[1])
 
     @staticmethod
     def Q33conv(qual: str):
@@ -260,11 +372,15 @@ class parse_fastq_rec(object):
 
                 return [xseq, xqual]
 
-        # if either ref is missed, return empty
         return ["", []]
+
 
 #%% Versions
 """
-1.4 - pre-compiled regex patterns, new parameter passing method via settings
-1.5 - added logic for dual-index X/INT
+2.0
+- pipeline v4 overhaul, all fastq processing moved here 
+1.5 
+- added logic for dual-index X/INT
+1.4 
+- pre-compiled regex patterns, new parameter passing method via settings
 """

@@ -9,7 +9,8 @@ required_packages = [
     'pandas',
     'tqdm',
     'numpy',
-    'rapidfuzz'
+    'rapidfuzz',
+    'regex',
 ]
 
  #'levenshtein', depr in favor of 'rapidfuzz'

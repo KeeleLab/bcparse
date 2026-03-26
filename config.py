@@ -67,7 +67,7 @@ base_opts = {
         "primer_path": os.path.join(ref_data_dir, "P5_primers.csv"),
         "dualindex": False,
         "use_core_fallback": True,
-        "core_bc": (12, 22), # Central 10bp motif to check shifted uniques!
+        "core_bc": (12, 10), # Trim 12 nt from each end of the 34-mer; stored as 0-based start, length
     },
     "X":{
         "rdir": "fwd",
@@ -188,13 +188,13 @@ def get_settings(stock: str, dualindex: bool):
 
         # Update with base profile
         if base_profile not in base_opts:
-            raise KeyError(f"Unknown base profile '{profile}' for stock {stock!r}")
+            raise KeyError(f"Unknown base profile '{base_profile}' for stock {stock!r}")
         settings_dict.update(base_opts[base_profile].copy())
 
         if dualindex:
             # Update with di profile     
             if base_profile not in dual_index_opts:
-                raise KeyError(f"Unknown dual index profile '{profile}' for stock {stock!r}")
+                raise KeyError(f"Unknown dual index profile '{base_profile}' for stock {stock!r}")
             settings_dict.update(dual_index_opts[base_profile].copy())
 
     else:

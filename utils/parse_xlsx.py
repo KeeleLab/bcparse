@@ -1,27 +1,39 @@
 # parse_xlsx.py
-
 """
 Name:       parse_xlsx.py
 Author:     CAG
-Version:    1.1
-Date:       2026/02/05
+Version:    1.2
+Date:       2026/03/26
 """
 
 #%% Imports
 
+from dataclasses import dataclass
 import os
 import re
 import pandas as pd
 from pathlib import Path
 import logging
 from typing import Dict, List, Optional, Tuple
-from utils.qc_ops import normalize_date
+from utils.qc_ops import normalize_date, normalize_long_df
+from utils.runinfo import RunInfo, make_run_id
 
 logger = logging.getLogger(__name__)
 
 #%% Classes
 
-class xlsx_pathmanager:
+@dataclass
+class ParsedAnalysis:
+    """
+    Container for one parsed Analysis workbook.
+    """
+    run_id: str
+    data_df: pd.DataFrame
+    runinfo: RunInfo
+    filepath: Path
+
+
+class XlsxPathManager:
     """
     Initialize the file manager.
 
@@ -30,6 +42,7 @@ class xlsx_pathmanager:
         txtfile: Optional text file listing file paths (one per line).
         pattern: Regex pattern to match filenames (defaults to '.*Analysis\\.xlsx$').
     """
+    
     def __init__(
         self,
         wdir: Optional[str] = None,
@@ -112,9 +125,9 @@ class xlsx_pathmanager:
         return list(seen.values())
 
 
-class parse_xlsx:
+class AnalysisWorkbookParser:
     """
-    parse_xlsx class:
+    AnalysisWorkbookParser class:
     Parses an Excel analysis file, extracts metadata and sample tables,
     and normalizes column names.
     """
@@ -129,7 +142,7 @@ class parse_xlsx:
         """
         Load all sheets from the Excel file into self.sheets.
         """
-        logger.debug(f"Loading Excel file: {self.filepath}")
+        #logger.debug(f"Loading Excel file: {self.filepath}")
         self.sheets: Dict[str, pd.DataFrame] = pd.read_excel(
             self.filepath,
             sheet_name=None,  # load all sheets into a dict
@@ -140,13 +153,17 @@ class parse_xlsx:
 
     def _parse_xlsx(self) -> None:
         """
-        Process the loaded Excel workbook into a standardized parsed_data DataFrame.
+        Process the loaded Excel workbook into a standardized long-format DataFrame.
         """
         all_samples: List[pd.DataFrame] = []
 
         # Obtain runinfo from first sheet
-        runinfo = self._parse_runinfo(next(iter(self.sheets.values())))
-        logger.debug(f"Runinfo meta: {runinfo}")
+        first_sheet = next(iter(self.sheets.values()))
+        self.runinfo = RunInfo.from_table(
+            raw_runinfo=self._sheet_to_runinfo_df(first_sheet),
+            filepath=str(self.filepath),
+        )
+        #logger.debug(f"Runinfo meta: {self.runinfo.run_meta}")
 
         # Process only 'samples' sheets (skip first and non-sample sheets)
         for i, (sname, df) in enumerate(self.sheets.items()):
@@ -155,55 +172,51 @@ class parse_xlsx:
             if 'samples' not in sname.lower():
                 continue
 
-            logger.debug(f"Parsing: {sname}")
+            #logger.debug(f"Parsing: {sname}")
             samples = self._parse_samples(df)
             all_samples.extend(samples)
 
-        # Define final DataFrame for this xlsx
-        self.parsed_data: pd.DataFrame = pd.concat(all_samples, ignore_index=True)
-        self.parsed_data["filepath"] = self.filepath
-        self.parsed_data["filename"] = self.filepath.name
+        self.run_id = make_run_id(
+            self.runinfo.run_number,
+            self.filepath.name,
+            self.runinfo.run_name,
+        )
 
-        for k, v in runinfo.items():
-            self.parsed_data[k] = v
+        self.data_df = self._combine_sample_tables(all_samples)
+        self.analysis = ParsedAnalysis(
+            run_id=self.run_id,
+            data_df=self.data_df.copy(),
+            runinfo=self.runinfo,
+            filepath=self.filepath,
+        )
 
-    def _parse_runinfo(self, first_df: pd.DataFrame) -> Dict[str, Optional[str]]:
+    def _sheet_to_runinfo_df(self, first_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Extract run metadata from the first sheet of the workbook.
+        Convert the first sheet of an analysis workbook back into a headered runinfo table.
         """
-        col0 = first_df.iloc[:, 0].astype(str).str.strip().str.lower()
+        if first_df.empty:
+            return pd.DataFrame()
 
-        # Map input labels to output keys
-        label_map = {
-            "run number": "run_number",
-            "run name": "run_name",
-            "date": "run_date"
-            }
-
-        result: Dict[str, Optional[str]] = {}
-        for label, out_key in label_map.items():
-            match_idx = col0[col0 == label].index
-            if not match_idx.empty:
-                val = first_df.iat[match_idx[0] + 1, 0]
-                if label == "date":
-                    val = normalize_date(val)
-                result[out_key] = val
-            else:
-                result[out_key] = None
-
-        return result
+        header = first_df.iloc[0].fillna("").astype(str).str.strip()
+        runinfo_df = first_df.iloc[1:].reset_index(drop=True).copy()
+        runinfo_df.columns = header
+        runinfo_df = runinfo_df.loc[:, runinfo_df.columns != ""]
+        return runinfo_df
 
     def _parse_samples(self, df: pd.DataFrame) -> List[pd.DataFrame]:
         """
         Extract multiple side-by-side tables from a 'samples' sheet DataFrame.
-
-        Recognizes specific sheet formats:
-        - r=3, c=6: original missing 'short bcs'
-        - r=3, c=7: original 7 data columns
-        - r=8, c=7: new format with metadata in rows 0-7
         """
         r, c = self._detect_breaks(df)
-        if r not in (3, 8) or c not in (6, 7):
+        
+        # Recognizes specific sheet formats:
+        valid_breaks = {
+            (3, 6), # r=3, c=6: original missing 'short bcs'
+            (3, 7), # r=3, c=7: original 7 data columns
+            (7, 7), # r=7, c=7: current non-legacy analysis output
+            (8, 7), # r=8, c=7: pre-refactor non-legacy analysis output
+        }
+        if (r, c) not in valid_breaks:
             logger.warning(f"Break detection failed (r={r}, c={c}); skipping sheet.")
             return []
 
@@ -235,32 +248,61 @@ class parse_xlsx:
             for k, v in meta_dict.items():
                 block_df[k] = v
 
-            tables.append(block_df)
+            resolved_idx_name, resolved_sample_id = self._resolve_runinfo_ids(meta_dict)
+            block_df["run_number"] = self.runinfo.run_number
+            block_df["idx_name"] = resolved_idx_name
+            block_df["sample_id"] = resolved_sample_id
 
-        if not tables:
-            return []
+            # Add shorts col if missing
+            if c == 6:
+                block_df["Short barcode?"] = "not checked!"
 
-        sheet_df = pd.concat(tables, ignore_index=True)
+            # Standardize column names per sample block so each table remains one SeqSamp.
+            block_df = block_df.rename(columns={
+                "Barcode": "bc_name",
+                "Sequence": "bc_seq",
+                "Counts": "bc_count",
+                "Proportion": "proportion",
+                "Hamming Dist to Another Sequence": "ldist_samp_lvl",
+                "putative_parent": "ldist_samp_lvl",
+                "Index hopping?": "x_idx",
+                "Multi-group share": "x_idx",
+                "Multi-group?": "x_idx",
+                "x_group": "x_idx",
+                "Short barcode?": "short_bc"
+                })
 
-        # Add shorts col if missing
-        if c == 6:
-            sheet_df["Short barcode?"] = "not checked!"
+            if "x_idx" in block_df.columns:
+                block_df["x_idx"] = pd.to_numeric(block_df["x_idx"], errors="coerce")
 
-        # Standardize column names
-        sheet_df = sheet_df.rename(columns={
-            "Barcode": "bc_name",
-            "Sequence": "bc_seq",
-            "Counts": "bc_count",
-            "Proportion": "proportion",
-            "Hamming Dist to Another Sequence": "ldist_samp_lvl",
-            "putative_parent": "ldist_samp_lvl",
-            "Index hopping?": "multi_idx",
-            "Multi-group?": "multi_idx",
-            "x_group": "multi_idx",
-            "Short barcode?": "short_bc"
-            })
+            tables.append(block_df.reset_index(drop=True))
 
-        return [sheet_df]
+        return tables
+
+    def _combine_sample_tables(self, sample_tables: List[pd.DataFrame]) -> pd.DataFrame:
+        """
+        Concatenate parsed sample blocks into one normalized long-format dataframe.
+        """
+        if sample_tables:
+            df = pd.concat([table.copy() for table in sample_tables], ignore_index=True)
+        else:
+            df = pd.DataFrame()
+
+        df["filename"] = self.filepath.name
+        df["run_id"] = self.run_id
+
+        df = normalize_long_df(
+            df,
+            run_number=self.runinfo.run_number,
+            run_name=self.runinfo.run_name,
+            run_date=self.runinfo.run_date,
+        )
+
+        df = self._rebuild_idx_name_from_runinfo(df)
+
+        df["run_id"] = df["run_id"].where(df["run_id"].notna(), self.run_id)
+
+        return df
 
     def _detect_breaks(self, df: pd.DataFrame) -> Tuple[Optional[int], Optional[int]]:
         """
@@ -296,6 +338,13 @@ class parse_xlsx:
                 "samp_date": normalize_date(meta_block.iat[0, 2]),
                 "input": meta_block.iat[2, 0],
                 }
+        elif r == 7:
+            return {
+                "samp_group": meta_block.iat[3, 1],
+                "samp_name": meta_block.iat[4, 1],
+                "samp_date": normalize_date(meta_block.iat[5, 1]),
+                "input": meta_block.iat[6, 1],
+                }
         elif r == 8:
             return {
                 "samp_group": meta_block.iat[4, 1],
@@ -306,7 +355,71 @@ class parse_xlsx:
         else:
             raise ValueError(f"Unrecognized header break row r={r}")
 
+    def _resolve_runinfo_ids(
+        self,
+        meta_dict: Dict[str, Optional[str]],
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Recover both idx_name and compile-mode sample_id for a sample block by
+        matching its metadata to the workbook's runinfo.
+        """
+        sample_meta_df = self.runinfo.sample_meta_df
+        if sample_meta_df.empty:
+            return None, None
+
+        match_df = sample_meta_df.copy()
+        for key in ["samp_group", "samp_name"]:
+            match_df = match_df.loc[match_df[key] == meta_dict.get(key)]
+
+        target_date = normalize_date(meta_dict.get("samp_date"))
+        if "samp_date" in match_df.columns:
+            match_df = match_df.loc[
+                match_df["samp_date"].apply(normalize_date) == target_date
+            ]
+
+        if len(match_df) == 1:
+            return match_df.iloc[0].get("idx_name"), match_df.iloc[0].get("sample_id")
+
+        return None, None
+
+    def _rebuild_idx_name_from_runinfo(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Re-assign idx_name from the workbook's own runinfo after table combine.
+
+        This keeps compile-mode workbook imports aligned with the associated
+        runinfo even if sample blocks were missing idx_name or carried stale ids.
+        """
+        if df.empty:
+            return df
+
+        runinfo_meta = self.runinfo.sample_meta_df.copy()
+        if runinfo_meta.empty:
+            return df
+
+        merge_cols = ["samp_group", "samp_name", "samp_date"]
+        runinfo_meta = runinfo_meta.loc[:, merge_cols + ["idx_name", "sample_id"]].copy()
+        runinfo_meta["samp_date"] = runinfo_meta["samp_date"].apply(normalize_date)
+        runinfo_meta = runinfo_meta.drop_duplicates(subset=merge_cols, keep="last")
+
+        merged = df.merge(
+            runinfo_meta.rename(
+                columns={
+                    "idx_name": "__runinfo_idx_name",
+                    "sample_id": "__runinfo_sample_id",
+                }
+            ),
+            how="left",
+            on=merge_cols,
+        )
+
+        matched = merged["__runinfo_idx_name"].notna()
+        merged.loc[matched, "idx_name"] = merged.loc[matched, "__runinfo_idx_name"]
+        merged.loc[matched, "sample_id"] = merged.loc[matched, "__runinfo_sample_id"]
+        return merged.drop(columns=["__runinfo_idx_name", "__runinfo_sample_id"])
+
 #%%
 """
-V1.1 - add normalize_date() as global function from utils.io, rather than class function
+V1.2 
+- add normalize_date() as global function from readers, rather than class function
+- modified to accomodate new downstream model class container runseries.py
 """

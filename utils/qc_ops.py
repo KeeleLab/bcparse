@@ -5,32 +5,145 @@ Author:     CAG
 Version:    3.0
 Date:       2026/03/20
 
-Consolidating qc fucntions for processing barcode data.
-These are used in parse_countdata.py and qc_ops.py
+Consolidating qc functions for processing barcode data.
+These are used across the parse- and compile-side build pipelines.
 """
 
 #%% Imports
 from __future__ import annotations
-from typing import Sequence, Literal, Dict, List, Optional, Callable, Tuple
+from typing import Any, Callable, Optional
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass
 from rapidfuzz.distance import Levenshtein
 from utils.bk_tree import build_ref_index, query
+from utils.runinfo import make_run_id, make_sample_id
 
 #%% General
 
-def normalize_date(date_val) -> Optional[str]:
+def normalize_date(date_val) -> Any:
     """
-    Coerce a value to a normalized date string (YYYY-MM-DD) if possible.
+    Coerce a value to a normalized pandas timestamp if possible.
     """
     try:
         dt = pd.to_datetime(date_val, errors="coerce")
         if pd.isna(dt):
-            return None
-        return dt.strftime("%Y-%m-%d")
+            return pd.NaT
+        return dt.normalize()
     except Exception:
-        return None
+        return pd.NaT
+
+
+def coerce_boolish(value):
+    """
+    Coerce common workbook/CSV representations to bool where possible.
+    """
+    if pd.isna(value):
+        return False
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    val = str(value).strip().lower()
+
+    if val in {"true", "yes", "y", "1"}:
+        return True
+    if val in {"false", "no", "n", "0", ""}:
+        return False
+
+    return False
+
+
+def normalize_long_df(
+    df: pd.DataFrame,
+    *,
+    run_number=None,
+    run_name=None,
+    run_date=None,
+    ) -> pd.DataFrame:
+    """
+    Normalize a long-format sequencing dataframe to the shared column contract.
+    """
+    df = df.copy()
+
+    defaults = {
+        "run_id": None,
+        "run_number": run_number,
+        "run_name": run_name,
+        "run_date": run_date,
+        "sample_id": None,
+        "idx_name": None,
+        "samp_group": None,
+        "samp_name": None,
+        "samp_date": None,
+        "input": None,
+        "bc_name": None,
+        "bc_count": 0,
+        "proportion": 0.0,
+        "above_cutoff": False,
+        "x_idx": np.nan,
+        "multi_idx": False,
+        "short_bc": False,
+        "putative_parent": None,
+        "ldist_samp_lvl": None,
+        "bc_seq": None,
+        "filename": None,
+    }
+
+    for col, default in defaults.items():
+        if col not in df.columns:
+            df[col] = default
+
+    # Accept legacy `run_num` on input, but normalize everything to `run_number`.
+    if "run_num" in df.columns:
+        df["run_number"] = df["run_number"].where(df["run_number"].notna(), df["run_num"])
+        df = df.drop(columns=["run_num"])
+
+    missing_run_id = df["run_id"].isna() | df["run_id"].astype(str).eq("")
+    df.loc[missing_run_id, "run_id"] = df.loc[missing_run_id].apply(
+        lambda row: make_run_id(
+            row.get("run_number"),
+            row.get("filename"),
+            row.get("run_name"),
+        ),
+        axis=1,
+    )
+
+    df["samp_date"] = df["samp_date"].apply(normalize_date)
+    df["run_date"] = df["run_date"].apply(normalize_date)
+
+    # Re-establish the numeric contract after CSV/XLSX round-trips.
+    df["bc_count"] = pd.to_numeric(df["bc_count"], errors="coerce").fillna(0)
+    df["proportion"] = pd.to_numeric(df["proportion"], errors="coerce").fillna(0.0)
+    df["input"] = pd.to_numeric(df["input"], errors="coerce")
+    df["x_idx"] = pd.to_numeric(df["x_idx"], errors="coerce")
+
+    for col in ["above_cutoff", "multi_idx", "short_bc"]:
+        df[col] = df[col].map(coerce_boolish)
+
+    # Compile-mode identity is the composite biological sample id.
+    missing_sample_id = df["sample_id"].isna() | df["sample_id"].astype(str).eq("")
+    df.loc[missing_sample_id, "sample_id"] = df.loc[missing_sample_id].apply(
+        lambda row: make_sample_id(
+            row.get("samp_group"),
+            row.get("samp_name"),
+            row.get("samp_date"),
+            row.get("run_number"),
+        ),
+        axis=1,
+    )
+
+    return df
+
+
+def base_parent_name(s: pd.Series) -> pd.Series:
+    """
+    Strip mutation suffixes from parent annotations back to bare bc_name values.
+    """
+    s2 = s.astype("string")
+    return s2.str.replace(r"_.*$", "", regex=True)
 
 
 def get_prop(df: pd.DataFrame):
@@ -238,7 +351,7 @@ def flag_putative_parents(
         returns="pairs",  # [df_q_idx[(df_r_idx, dist), ...]]
         ) if not df_n.empty else []
 
-    # Pass to parent select (req p>c, suffix shows subs)
+    # Pass to parent select (req p>c, suffix shows ldist ops)
     named_parents = _select_parents(
         q_names=n_names,
         q_seqs=n_seqs,
@@ -262,7 +375,7 @@ def flag_putative_parents(
         returns="pairs",  # [df_q_idx[(df_r_idx, dist), ...]]
         ) if not df_u.empty else []
 
-    # Pass to parent select (!req p>c, suffix shows subs)
+    # Pass to parent select (!req p>c, suffix shows ldist ops)
     unique_parents = _select_parents(
         q_names=u_names,
         q_seqs=u_seqs,
@@ -299,7 +412,7 @@ def flag_putative_parents(
             u2_counts = df_u2[bc_count_col].astype(int).to_numpy()
             u2_names  = df_u2[bc_name_col].astype(object).to_numpy()
 
-            # Pass to parent selection (req p>c, suffix shows match locus)
+            # Pass to parent selection (req p>c, tag as core fallback hit)
             unique_parents_core = _select_parents(
                 q_names=u2_names,
                 q_seqs=u2_seqs,
@@ -309,7 +422,7 @@ def flag_putative_parents(
                 r_seqs=n_seqs,
                 r_counts=n_counts,
                 req_parent_higher=False,
-                suffix_fn=_parent_suffix_full,
+                suffix_fn=_parent_suffix_core,
                 )
             
             if unique_parents_core:
@@ -363,7 +476,7 @@ def _core_bc_search(
             query_seqs=win_q_seqs,
             mode="single",
             scope="radius",
-            max_radius=0,  # Require exact match for core searches
+            max_radius=1,  # Allow one edit in sliding-window core searches
             returns="pairs",
         )
 
@@ -453,7 +566,7 @@ def _parent_suffix_full(parent_seq: str, child_seq: str) -> str:
     """
     ops = Levenshtein.editops(parent_seq, child_seq)
     if not ops:
-        return ""
+        return f"{len(parent_seq)}="
     
     # init local vars
     parts: list[str] = []
@@ -504,6 +617,13 @@ def _parent_suffix_full(parent_seq: str, child_seq: str) -> str:
     return "".join(parts)
 
 
+def _parent_suffix_core(parent_seq: str, child_seq: str) -> str:
+    """
+    Return the fixed tag used for core-barcode fallback hits.
+    """
+    return "core"
+
+
 def _parent_suffix_sub(parent_seq: str, child_seq: str) -> str:
     """
     Return compact substitution suffix for parent->child, e.g. "5C_12A".
@@ -540,12 +660,6 @@ def collapse_ambig_children(df: pd.DataFrame):
     df = df.copy()
 
     # helper: strip a single trailing -<suffix> from the putative_parent
-    def base_parent_name(s: pd.Series) -> pd.Series:
-        # coerce to pandas string dtype (preserves missing as <NA>)
-        s2 = s.astype("string")
-        # safe replace; .str is valid on string dtype
-        return s2.str.replace(r"_.*$", "", regex=True)
-
     # Drop rows where 'bc_seq' contains more than one 'N'
     df = df[~(df["bc_seq"].str.count("N") > 1)]
 
@@ -585,23 +699,28 @@ def collapse_ambig_children(df: pd.DataFrame):
 
 def collapse_to_parent(df: pd.DataFrame):
     """
-    Collapse all children to their parent rows.
+    Collapse all children to their parent rows within the scope of the
+    dataframe provided.
+
+    In other words, this function does not define grouping boundaries itself;
+    it assumes the caller has already subset the dataframe to the intended
+    collapse level (e.g. one SeqSamp, one idx_name, one group aggregate, etc).
     """
-    if df["putative_parent"].isna().all():
-        return df, None
+    if "putative_parent" in df.columns and df["putative_parent"].notna().any():
+        parent_col = "putative_parent"
+    elif "ldist_samp_lvl" in df.columns and df["ldist_samp_lvl"].notna().any():
+        parent_col = "ldist_samp_lvl"
+    else:
+        return df
 
     df = df.copy()
 
-    def base_parent_name(s: pd.Series) -> pd.Series:
-        s2 = s.astype("string")
-        return s2.str.replace(r"_.*$", "", regex=True)
-
-    parent_base = base_parent_name(df["putative_parent"])
-    has_parent = df["putative_parent"].notna()
+    parent_base = base_parent_name(df[parent_col])
+    has_parent = df[parent_col].notna()
 
     child_rows = df.loc[has_parent].copy()
     if child_rows.empty:
-        return df, None
+        return df
 
     # keep all non-child rows, including the parent rows themselves
     df = df.copy()

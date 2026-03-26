@@ -40,8 +40,8 @@ class ArgSelectionGUI:
 
         # Define file types with dialog options
         self.file_types = {
-            "sample.fq": ("Select sample fastq file", "Fastq files", "*.*"),
-            "runinfo.xlsx": ("Select Runinfo Excel file", "Excel files", "*.*"),
+            "sample_path": ("Select sample fastq file", "Fastq files", "*.*", "sample.fq"),
+            "runinfo_path": ("Select Runinfo Excel file", "Excel files", "*.*", "runinfo.xlsx"),
             }
 
         # Initialize BooleanVars with defaults
@@ -50,6 +50,7 @@ class ArgSelectionGUI:
         self.mask_var = tk.BooleanVar(value=False)
         self.collapse_var = tk.BooleanVar(value=False)
         self.legacy_format_var = tk.BooleanVar(value=False)
+        self.collapse_to_parent_var = tk.BooleanVar(value=True)
 
         # Initialize IntVars with defaults
         self.mean_qual_var = tk.IntVar(value=30)
@@ -64,7 +65,7 @@ class ArgSelectionGUI:
         Define action for file selection buttons
         """
         # Open file dialog and update file path
-        title, file_desc, file_ext = self.file_types[file_type]
+        title, file_desc, file_ext, label = self.file_types[file_type]
 
         path = filedialog.askopenfilename(
             title=title, filetypes=[(file_desc, file_ext)], initialdir=os.getcwd()
@@ -72,7 +73,7 @@ class ArgSelectionGUI:
 
         if path:
             self.args[file_type] = path
-            self.labels[file_type].config(text=f"{file_type}: {path}")
+            self.labels[file_type].config(text=f"{label}: {path}")
 
     def browse_output(self):
         """
@@ -106,20 +107,20 @@ class ArgSelectionGUI:
         req_label.pack(padx=2, pady=2, anchor="w")
 
         # Create selection buttons for files
-        for _, (file_type, _) in enumerate(self.file_types.items()):
+        for _, (file_type, (_, _, _, label)) in enumerate(self.file_types.items()):
             frame = tk.Frame(self.req_frame)
             frame.pack(fill=tk.X, expand=True, pady=2)
 
             tk.Button(
                 frame,
-                text=f"Browse {file_type}",
+                text=f"Browse {label}",
                 command=lambda ft=file_type: self.browse_file(ft),
                 ).pack(
                     side=tk.LEFT, 
                     padx=5
                     )
 
-            self.labels[file_type] = tk.Label(frame, text=f"{file_type}: Not selected")
+            self.labels[file_type] = tk.Label(frame, text=f"{label}: Not selected")
             self.labels[file_type].pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
 
         # Output directory
@@ -298,6 +299,17 @@ class ArgSelectionGUI:
             )
         self.filt_mat_ac_checkbox.pack(side=tk.LEFT, padx=2)
 
+        # Checkbox for collapse_to_parent
+        frame = tk.Frame(self.fmt_frame)
+        frame.pack(fill=tk.X, expand=True, pady=2)
+
+        self.collapse_to_parent_checkbox = tk.Checkbutton(
+            frame,
+            text="Collapse grouped outputs to parent",
+            variable=self.collapse_to_parent_var,
+            )
+        self.collapse_to_parent_checkbox.pack(side=tk.LEFT, padx=2)
+
         # Submit button
         submit_button = tk.Button(
             self.main_frame, text="Submit", command=self.on_submit
@@ -314,7 +326,7 @@ class ArgSelectionGUI:
         Define action for submit button
         """
         # Check if all required files have been selected
-        required_fields = ["sample.fq", "runinfo.xlsx", "out_path"]
+        required_fields = ["sample_path", "runinfo_path", "out_path"]
 
         # Collect missing fields
         missing_fields = [field for field in required_fields if field not in self.args]
@@ -338,14 +350,15 @@ class ArgSelectionGUI:
         self.args["dist_threshold"] = self.dist_threshold_var.get()
         self.args["filt_mat_ac"] = self.filt_mat_ac_var.get()
         self.args["legacy_format"] = self.legacy_format_var.get()
+        self.args["collapse_to_parent"] = self.collapse_to_parent_var.get()
 
         # All required selections are made; close the window
         self.root.quit()
 
 
-    def run(self) -> tuple[str, str, str, str, int, bool, int, bool, bool, int, int, bool, bool]:
+    def run(self) -> dict:
         """
-        Run the GUI and return a list of args
+        Run the GUI and return a dict of args
         """
         self.root.mainloop()  # Wait for user interaction
 
@@ -354,43 +367,11 @@ class ArgSelectionGUI:
         except tk.TclError:
             pass  # Ignore if already destroyed
 
-        sample_path = str(self.args.get("sample.fq", ""))
-        runinfo_path = str(self.args.get("runinfo.xlsx", ""))
-        out_path = str(self.args.get("out_path", ""))
-        stock = str(self.args.get("stock", ""))
-        dualindex = bool(self.args.get("dualindex", False))
-        mean_qual = int(self.args.get("mean_qual", 30))
-        mismatches = int(self.args.get("mismatches", 1))
-        mask = bool(self.args.get("mask", False))
-        collapse = bool(self.args.get("collapse", False))
-        mask_qual = int(self.args.get("mask_qual", 20))
-        dist_threshold = int(self.args.get("dist_threshold", 1))
-        filt_mat_ac = bool(self.args.get("filt_mat_ac", False))
-        legacy_format = bool(self.args.get("legacy_format", False))
-
-        return (
-            sample_path,
-            runinfo_path,
-            out_path,
-            stock,
-            dualindex,
-            mean_qual,
-            mismatches,
-            mask,
-            collapse,
-            mask_qual,
-            dist_threshold,
-            filt_mat_ac,
-            legacy_format,
-            )
+        return dict(self.args)
 
 
 
 # --- COMPILE MODE ---
-import tkinter as tk
-from tkinter import filedialog, messagebox
-import os
-
 class CompileArgSelectionGUI:
     def __init__(self):
         self.root = tk.Tk()
@@ -406,6 +387,7 @@ class CompileArgSelectionGUI:
         self.ldist_s_var = tk.BooleanVar(value=False)
         self.ldist_g_var = tk.BooleanVar(value=False)
         self.ccheck_var = tk.BooleanVar(value=True)
+        self.collapse_to_parent_var = tk.BooleanVar(value=True)
         self.dist_threshold_var = tk.IntVar(value=1)
 
         self.setup_ui()
@@ -518,6 +500,13 @@ class CompileArgSelectionGUI:
              text="Run contamination check & get matrices", variable=self.ccheck_var)
         self.contam_check.pack(anchor="w", padx=5, pady=5)       
 
+        self.collapse_to_parent = tk.Checkbutton(
+            self.check_frame,
+            text="Collapse children to parent within each sample",
+            variable=self.collapse_to_parent_var,
+        )
+        self.collapse_to_parent.pack(anchor="w", padx=5, pady=5)
+
         # Submit button
         submit_btn = tk.Button(self.main_frame, text="Submit", command=self.on_submit)
         submit_btn.pack(pady=10, anchor="w")
@@ -563,6 +552,7 @@ class CompileArgSelectionGUI:
         self.args["ldist_samp_lvl"]  = bool(self.ldist_s_var.get())
         self.args["ldist_group_lvl"] = bool(self.ldist_g_var.get())
         self.args["contam_check"]    = bool(self.ccheck_var.get())
+        self.args["collapse_to_parent"] = bool(self.collapse_to_parent_var.get())
 
         # distance params
         dt = int(self.dist_threshold_var.get())
@@ -578,36 +568,16 @@ class CompileArgSelectionGUI:
         except tk.TclError:
             pass
 
-        xlsx_path     = str(self.args.get("xlsx_path", ""))
-        out_path      = str(self.args.get("out_path", ""))
-        base_csv_path = self.args.get("base_csv_path", None) # Not str() on purpose to preserve None
-        out_prefix    = str(self.args.get("out_prefix", ""))
-
-        ldist_samp    = bool(self.args.get("ldist_samp_lvl", False))
-        ldist_group   = bool(self.args.get("ldist_group_lvl", False))
-        contam_check  = bool(self.args.get("contam_check", False))
-
-        dist_threshold = int(self.args.get("dist_threshold", 1))
-
-        return (
-            xlsx_path,
-            out_path,
-            base_csv_path,
-            out_prefix,
-            ldist_samp,
-            ldist_group,
-            contam_check,
-            dist_threshold,
-        )
+        return dict(self.args)
 
 
 
 #%% Versions
 """
-2.42 - Dropped dist backend param
+2.5  - Dropped dist backend param
 2.41 - Changed defaults and parse gui messages
-2.4 - added optional base csv to compile mode
-2.3 - changed to accomodate dist_threshold/backend and dualindex params
-2.2 - changed to accomodate out_path/out_prefix changes
-2.1 - set compile GUI to start from cwd
+2.4  - added optional base csv to compile mode
+2.3  - changed to accomodate dist_threshold/backend and dualindex params
+2.2  - changed to accomodate out_path/out_prefix changes
+2.1  - set compile GUI to start from cwd
 """
