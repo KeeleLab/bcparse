@@ -347,6 +347,96 @@ class RunSeries:
         stamped["__compile_source_mtime"] = source_mtime
         return stamped
 
+    @staticmethod
+    def _describe_compile_sample(row: pd.Series) -> str:
+        """
+        Build a readable sample label for compile dedup/drop messages.
+        """
+        parts: list[str] = []
+
+        run_number = row.get("run_number")
+        if pd.notna(run_number) and str(run_number).strip():
+            parts.append(f"run {run_number}")
+
+        idx_name = row.get("idx_name")
+        if pd.notna(idx_name) and str(idx_name).strip():
+            parts.append(f"idx {idx_name}")
+
+        sample_id = row.get("sample_id")
+        if pd.notna(sample_id) and str(sample_id).strip():
+            parts.append(f"sample_id {sample_id}")
+
+        samp_group = row.get("samp_group")
+        samp_name = row.get("samp_name")
+        samp_date = row.get("samp_date")
+        sample_bits = [
+            str(value).strip()
+            for value in [samp_group, samp_name]
+            if pd.notna(value) and str(value).strip()
+        ]
+        if pd.notna(samp_date):
+            norm_date = qc.normalize_date(samp_date)
+            if pd.notna(norm_date):
+                sample_bits.append(str(norm_date.date()))
+            elif str(samp_date).strip():
+                sample_bits.append(str(samp_date).strip())
+        if sample_bits:
+            parts.append(" / ".join(sample_bits))
+
+        source_label = row.get("__compile_source")
+        if pd.notna(source_label) and str(source_label).strip():
+            parts.append(f"source={source_label}")
+
+        filename = row.get("filename")
+        if pd.notna(filename) and str(filename).strip():
+            parts.append(f"file={filename}")
+
+        return " | ".join(parts) if parts else "<unlabeled sample>"
+
+    @classmethod
+    def _report_dropped_compile_replicates(
+        cls,
+        *,
+        dedup_df: pd.DataFrame,
+        winners: pd.DataFrame,
+    ) -> None:
+        """
+        Print explicit compile dedup decisions so dropped replicates are visible.
+        """
+        if dedup_df.empty:
+            return
+
+        winner_rows = winners.rename(
+            columns={
+                "__compile_source_rank": "__winner_source_rank",
+                "__compile_source_mtime": "__winner_source_mtime",
+                "__compile_source_order": "__winner_source_order",
+            }
+        )
+
+        decisions = dedup_df.merge(
+            winner_rows,
+            how="left",
+            on=["__sample_identity"],
+        )
+
+        kept_mask = (
+            decisions["__compile_source_rank"].eq(decisions["__winner_source_rank"])
+            & decisions["__compile_source_mtime"].eq(decisions["__winner_source_mtime"])
+            & decisions["__compile_source_order"].eq(decisions["__winner_source_order"])
+        )
+        dropped = decisions.loc[~kept_mask].copy()
+        if dropped.empty:
+            return
+
+        print("Compile: dropping duplicate replicate inputs...")
+        for sample_identity, group in dropped.groupby("__sample_identity", sort=False):
+            kept_row = decisions.loc[decisions["__sample_identity"].eq(sample_identity) & kept_mask]
+            kept_desc = cls._describe_compile_sample(kept_row.iloc[0]) if not kept_row.empty else "<unknown kept source>"
+            print(f"  keeping: {kept_desc}")
+            for _, row in group.iterrows():
+                print(f"  dropped: {cls._describe_compile_sample(row)}")
+
 
     @classmethod
     def _deduplicate_compile_sources(
@@ -434,6 +524,11 @@ class RunSeries:
                 kind="stable",
             )
             .drop_duplicates(subset=["__sample_identity"], keep="last")
+        )
+
+        cls._report_dropped_compile_replicates(
+            dedup_df=dedup_df,
+            winners=winners,
         )
 
         merged = dedup_df.merge(
@@ -635,16 +730,22 @@ class RunSeries:
         csv_path = os.path.join(out_path, f"{out_prefix}_all.csv")
         xlsx_path = os.path.join(out_path, f"{out_prefix}_above_cutoff.xlsx")
 
-        # Write full compiled df to csv
-        self.df.to_csv(csv_path, index=False)
+        # Build QC-aware compile outputs before writing files so all.csv
+        # includes parent-check annotations produced during emit_qc().
+        compile_df, df_ac, contam_check = self.emit_qc(settings=settings)
+        compile_df_out = qc.format_output_dates(compile_df, columns=["run_date", "samp_date"])
+        df_ac_out = qc.format_output_dates(df_ac, columns=["run_date", "samp_date"])
 
-        # Get QC outputs
-        _, df_ac, contam_check = self.emit_qc(settings=settings)
+        # Write full compiled df to csv
+        compile_df_out.to_csv(csv_path, index=False)
 
         # Format workbook components
-        runinfo_df = concat_series_runinfo(self)
-        sidelong_dict, _ = sidelong_tables(df_ac)
-        _, mat_dict = group_mat_dict(df_ac)
+        runinfo_df = qc.format_output_dates(
+            concat_series_runinfo(self),
+            columns=["Date", "run_date", "samp_date"],
+        )
+        sidelong_dict, _ = sidelong_tables(df_ac_out)
+        _, mat_dict = group_mat_dict(df_ac_out)
 
         # Write the above-cutoff workbook
         with pd.ExcelWriter(xlsx_path) as writer:
@@ -652,11 +753,11 @@ class RunSeries:
                 runinfo_df.to_excel(writer, sheet_name="runinfo", index=False)
 
             # above_cutoff 
-            df_ac.to_excel(writer, sheet_name="all_samples", index=False)
+            df_ac_out.to_excel(writer, sheet_name="all_samples", index=False)
 
             # full matrix and contamination report
             if contam_check:
-                full_mat, contam_table = contam_report(df_ac)
+                full_mat, contam_table = contam_report(df_ac_out)
                 full_mat.to_excel(writer, sheet_name="full_matrix", index=True, header=True)
                 contam_table.to_excel(writer, sheet_name="contam_report", index=True, header=True)
 

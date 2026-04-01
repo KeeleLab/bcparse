@@ -9,7 +9,7 @@ from argparse import RawTextHelpFormatter
 from dataclasses import asdict, dataclass
 from config import stocks, get_settings
 
-ver = "4.0 - 2026.03.26"
+ver = "4.1 - 2026.04.01"
 
 description = f"""
 Name:       bcParse.py
@@ -111,6 +111,12 @@ parser.add_argument(
     )
 
 parser.add_argument(
+    "--append_spike_ref",
+    action="store_true",
+    help="Append Spike_reference.fa entries to the selected barcode reference in parse mode"
+    )
+
+parser.add_argument(
     "--gui", action="store_true",
     help="Use GUI for file selection"
     )
@@ -181,6 +187,7 @@ class ParseSettings:
     filt_mat_ac: bool = False
     legacy_format: bool = False
     collapse_to_parent: bool = True
+    append_spike_ref: bool = False
 
     @classmethod
     def from_mapping(cls, values: dict) -> "ParseSettings":
@@ -269,6 +276,7 @@ def run_parse_mode(args):
             filt_mat_ac = getattr(args, "filt_mat_ac"),
             legacy_format = getattr(args, "legacy_format"),
             collapse_to_parent = getattr(args, "collapse_to_parent"),
+            append_spike_ref = getattr(args, "append_spike_ref"),
         ).to_dict()
 
     try:
@@ -296,7 +304,8 @@ def run_parse_mode(args):
     # Get stock-defined run settings - add new stocks and settings in config.py!
     settings = get_settings(
         params["stock"], 
-        params["dualindex"]
+        params["dualindex"],
+        append_spike_ref=params["append_spike_ref"],
         )
     
     # Add CLI/GUI args to settings dict:
@@ -316,6 +325,7 @@ def run_parse_mode(args):
         runinfo_path = settings["runinfo_path"],
         primer_path = settings["primer_path"],
         barcode_path = settings["barcode_path"],
+        spike_path = settings.get("spike_path") if settings.get("append_spike_ref", False) else None,
         p7_path = settings["p7_path"] if settings["dualindex"] else None,
     )
 
@@ -385,6 +395,7 @@ def run_compile_mode(args):
     from utils.parse_xlsx import(
         XlsxPathManager,
         AnalysisWorkbookParser,
+        WorkbookParseError,
         )
 
     from utils.runseries import RunSeries
@@ -456,8 +467,12 @@ def run_compile_mode(args):
             px = AnalysisWorkbookParser(filepath=f)
             if not px.data_df.empty:
                 res_px.append(px.analysis)
-        except Exception as e:
-            logger.error(f"Failed processing {f}: {e}")
+        # Exit on any parsing error, with informative message about which file caused the issue.
+        except WorkbookParseError as e:
+            raise SystemExit(
+                "Compile aborted while parsing workbook:\n"
+                f"{e}"
+            ) from e
 
     print(f"Parsed {len(res_px)} non-empty analysis workbook(s).")
 
@@ -534,6 +549,12 @@ if __name__ == "__main__":
 ************
 * Versions *
 ************
+v4.1 - growing pains
+1. Include ldist flags in all.csv compile output
+2. Clean output dates to be YYYY-MM-DD
+3. Added logic + checkbox to include Spike barcodes in parse mode, via settings and config.py. See --append_spike_ref and Spike entry in controls_opts for details.
+4. Spike hits disallowed from above-cutoff box in sidelong tables
+5. Normalize samp_group names as strings to avoid issues with 'number' animal names. 
 
 v4.0
 0. Major overhaul of entire codebase, moving to class-based containers for runinfo, seqsamp, seqrun, and runseries. 

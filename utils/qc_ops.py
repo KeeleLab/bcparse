@@ -33,6 +33,29 @@ def normalize_date(date_val) -> Any:
         return pd.NaT
 
 
+def format_output_dates(
+    df: pd.DataFrame,
+    columns: Optional[list[str]] = None,
+) -> pd.DataFrame:
+    """
+    Format date-like output columns as YYYY-MM-DD strings for emitted files.
+    """
+    if df is None or df.empty:
+        return df.copy() if isinstance(df, pd.DataFrame) else df
+
+    df = df.copy()
+    target_cols = columns or ["run_date", "samp_date", "Date"]
+
+    for col in target_cols:
+        if col not in df.columns:
+            continue
+        parsed = pd.to_datetime(df[col], errors="coerce")
+        formatted = parsed.dt.strftime("%Y-%m-%d")
+        df[col] = formatted.where(parsed.notna(), df[col])
+
+    return df
+
+
 def coerce_boolish(value):
     """
     Coerce common workbook/CSV representations to bool where possible.
@@ -113,6 +136,7 @@ def normalize_long_df(
 
     df["samp_date"] = df["samp_date"].apply(normalize_date)
     df["run_date"] = df["run_date"].apply(normalize_date)
+    df["samp_group"] = df["samp_group"].where(df["samp_group"].notna(), pd.NA).astype("string")
 
     # Re-establish the numeric contract after CSV/XLSX round-trips.
     df["bc_count"] = pd.to_numeric(df["bc_count"], errors="coerce").fillna(0)

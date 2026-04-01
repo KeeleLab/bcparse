@@ -65,6 +65,7 @@ base_opts = {
         "tdir_bc": "upstream",
         "tlen_bc": 34,
         "primer_path": os.path.join(ref_data_dir, "P5_primers.csv"),
+        "append_spike_ref": False,
         "dualindex": False,
         "use_core_fallback": True,
         "core_bc": (12, 10), # Trim 12 nt from each end of the 34-mer; stored as 0-based start, length
@@ -78,6 +79,7 @@ base_opts = {
         "tdir_bc": "downstream",
         "tlen_bc": 45,
         "primer_path": os.path.join(ref_data_dir, "P5_primers.csv"),
+        "append_spike_ref": False,
         "dualindex": False,
         "core_bc": None,
     }
@@ -105,6 +107,13 @@ dual_index_opts = {
         },
 }
 
+controls_opts = {
+    "Spike": {
+        "spike_path": os.path.join(ref_data_dir, "Spike_reference.fasta"),
+        "append_spike_ref": True,
+    },
+}
+
 settings_opts = {
     "239M": {
         "base_profile" : "M",
@@ -121,14 +130,6 @@ settings_opts = {
     "M+M2": {
         "base_profile" : "M",
         "barcode_path": os.path.join(ref_data_dir, "M_plus_M2_reference.fasta"),
-        },
-    "M+Spike": {
-        "base_profile" : "M",
-        "barcode_path": os.path.join(ref_data_dir, "M_plus_spike_reference.fasta"),
-        },
-    "M2+Spike": {
-        "base_profile" : "M",
-        "barcode_path": os.path.join(ref_data_dir, "M2_plus_spike_reference.fasta"),
         },
     "OptM": {
         "base_profile" : "M",
@@ -179,7 +180,7 @@ stocks = list(settings_opts.keys()) + ["Manual CLI"]
 
 
 # Define stock dict
-def get_settings(stock: str, dualindex: bool):
+def get_settings(stock: str, dualindex: bool, append_spike_ref: bool = False):
 
     if stock in settings_opts:
         # Pull stock settings from dict
@@ -197,6 +198,11 @@ def get_settings(stock: str, dualindex: bool):
                 raise KeyError(f"Unknown dual index profile '{base_profile}' for stock {stock!r}")
             settings_dict.update(dual_index_opts[base_profile].copy())
 
+        if append_spike_ref:
+            if "Spike" not in controls_opts:
+                raise KeyError("Unknown control option 'Spike'")
+            settings_dict.update(controls_opts["Spike"].copy())
+
     else:
         print("Manual CLI mode — please enter all required parameters.")
         settings_dict = {
@@ -209,6 +215,8 @@ def get_settings(stock: str, dualindex: bool):
             "tlen_bc": int(input("Enter barcode target length: ")),
             "primer_path": input("Path/to/sequencing_primers.csv"),
             "barcode_path": input("Path/to/barcode_reference.fasta"),
+            "spike_path": input("Optional path/to/Spike_reference.fa (leave blank to skip): "),
+            "append_spike_ref": input("Append spike reference fasta? [y/n]: ").lower().startswith("y"),
             "dualindex": input("Run dual index mode? [y/n]: ").lower().startswith("y"),
             "di_profile": input("Profile for dual-index handling? [M/X]: "),
             "ref_p7": input("Enter p7 reference sequence: "),
@@ -217,6 +225,9 @@ def get_settings(stock: str, dualindex: bool):
             "p7_path": input("Path/to/p7_primers.csv"),
             "fill_seq": input("Pad sequence for dual-index 3' repair - ask Charlie or `None`"),
             }
+
+        if not settings_dict["append_spike_ref"]:
+            settings_dict["spike_path"] = None
 
     return settings_dict
 

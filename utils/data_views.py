@@ -113,13 +113,29 @@ def sidelong_tables(df: pd.DataFrame, legacy_format: bool = False):
             ]
         ]
 
+        # Set conditions for grouping barcodes in sidelong table:
         c1 = df_body["above_cutoff"]
         c2 = df_body["putative_parent"].notna()
-        c3 = df_body["bc_name"].str.contains("Unique")
+        c3 = df_body["bc_name"].str.startswith("Unique", na=False)
+        c4 = df_body["bc_name"].str.startswith("Spike", na=False)
 
-        # Bitpack the flag columns - this is actually slick.
-        df_body["flag"] = c1.astype(int) * 4 + c2.astype(int) * 2 + c3.astype(int)
-        df_body["rowgroup"] = df_body["flag"].map({4: 0, 5: 0, 6: 1, 7: 1}).fillna(2)
+        # Bitpack
+        df_body["flag"] = (
+            c1.astype(int) * 8    # 8: above_cutoff
+            + c2.astype(int) * 4  # 4: has parent
+            + c3.astype(int) * 2  # 2: Unique
+            + c4.astype(int)      # 1: Spike
+        )
+
+        df_body["rowgroup"] = df_body["flag"].map({
+            8: 0,    # Above cutoff, no parent, named
+            10: 0,   # Above cutoff, no parent, Unique
+            9: 1,    # Above cutoff, no parent, Spike
+            12: 1,   # Above cutoff, has parent, named
+            13: 1,   # Above cutoff, has parent, Spike
+            14: 1,   # Above cutoff, has parent, Unique
+        }).fillna(2)
+
         df_body = df_body.sort_values(by=["rowgroup", "proportion"], ascending=[True, False]).reset_index(drop=True)
 
         # Recalculate group 0's proportions to total 1.
@@ -190,8 +206,11 @@ def sidelong_tables(df: pd.DataFrame, legacy_format: bool = False):
                 raise ValueError(f"{key} has multiple values in {split_key}={split_id}: {values.tolist()}")
             header_dict[key] = values.iloc[0]
 
+        for key in ["run_date", "samp_date"]:
+            if key in header_dict:
+                header_dict[key] = _format_legacy_date(header_dict[key])
+
         if legacy_format:
-            header_dict["samp_date"] = _format_legacy_date(header_dict["samp_date"])
             header_data = [
                 [
                     header_dict["samp_group"],
@@ -251,6 +270,8 @@ def samp_group_matrices(seq_run: SeqRun, filt_ac=False, collapse_to_parent=False
     else:
         df = seq_run.df.copy()
 
+    df = qc.format_output_dates(df, columns=["run_date", "samp_date"])
+
     # Get distinct {samp_group: [idx_name(s)]}
     groups = df.groupby("samp_group")["idx_name"].unique().to_dict()
 
@@ -263,17 +284,22 @@ def samp_group_matrices(seq_run: SeqRun, filt_ac=False, collapse_to_parent=False
             # Pull df copy
             df_filt = df[(df["idx_name"].isin(idx_names))].copy()
 
-            # This is a little overwrought - but I'm leaving it in case we need the flexibility.
-            # Conditions for grouping barcodes
+            # Conditions for grouping barcodes to match sidelong table logic:
             c1 = df_filt["above_cutoff"]
             c2 = df_filt["putative_parent"].notna()
-            c3 = df_filt["bc_name"].str.contains("Unique")
+            c3 = df_filt["bc_name"].str.startswith("Unique", na=False)
+            c4 = df_filt["bc_name"].str.startswith("Spike", na=False)
 
-            # Bitpack the flag columns - this is actually slick.
-            df_filt["flag"] = c1.astype(int) * 4 + c2.astype(int) * 2 + c3.astype(int) * 1
+            # Bitpack the flag columns using the same explicit scheme as sidelong_tables().
+            df_filt["flag"] = (
+                c1.astype(int) * 8
+                + c2.astype(int) * 4
+                + c3.astype(int) * 2
+                + c4.astype(int)
+            )
 
             # filter above cutoff rows
-            df_filt = df_filt[df_filt["flag"].isin([4, 5])].copy()
+            df_filt = df_filt[df_filt["flag"].isin([8, 10])].copy() # Only include above_cutoff barcodes without parents, excluding Spikes but including Uniques, to match sidelong table logic.
 
             # recalculate proportions based on above_cutoff data
             df_filt["proportion"] = (
@@ -310,7 +336,7 @@ def group_mat_dict(df_ac: pd.DataFrame):
     """
     Format a dict of per-group above-cutoff sample matrices.
     """
-    df = df_ac.copy()
+    df = qc.format_output_dates(df_ac, columns=["run_date", "samp_date"])
     df_dict = {k: v for k, v in df.groupby("samp_group")}
     mat_dict = {}
 
@@ -361,7 +387,7 @@ def contam_report(df_ac: pd.DataFrame):
     """
     Format full-matrix and contamination report outputs for a compiled series.
     """
-    df = df_ac.copy()
+    df = qc.format_output_dates(df_ac, columns=["run_date", "samp_date"])
 
     df["n_groups"] = df.groupby("bc_name")["samp_group"].transform("nunique")
     df["n_samps"] = df.groupby("bc_name")["samp_name"].transform("nunique")
@@ -420,7 +446,7 @@ def concat_series_runinfo(run_series: RunSeries) -> pd.DataFrame:
         if runinfo is None:
             continue
 
-        runinfo_df = runinfo.copy_raw_df()
+        runinfo_df = qc.format_output_dates(runinfo.copy_raw_df(), columns=["Date", "run_date", "samp_date"])
         if runinfo_df.empty:
             continue
 

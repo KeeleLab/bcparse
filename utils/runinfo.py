@@ -307,23 +307,20 @@ class RunInfo:
         Find cases where distinct runinfo index labels collapse to the same
         compile-mode composite sample identity.
         """
-        if self.raw_df is None or self.raw_df.empty:
+        sample_meta_df = self.sample_meta_df
+        if sample_meta_df.empty:
             return {}
 
-        raw_df = self.raw_df.copy()
-        idx_col = self.full_index_col
-        required_cols = {idx_col, "Animal", "Sample", "Date"}
-        if not required_cols.issubset(raw_df.columns):
+        required_cols = {"idx_name", "sample_id"}
+        if not required_cols.issubset(sample_meta_df.columns):
             return {}
 
-        sample_rows = raw_df.dropna(subset=[idx_col]).copy()
+        sample_rows = sample_meta_df.dropna(subset=["idx_name", "sample_id"]).copy()
         if sample_rows.empty:
             return {}
 
-        sample_rows["sample_id"] = sample_rows[idx_col].astype(str)
-
         grouped = (
-            sample_rows.groupby("sample_id")[idx_col]
+            sample_rows.groupby("sample_id")["idx_name"]
             .apply(lambda s: sorted({str(value) for value in s.dropna().tolist() if str(value)}))
             .to_dict()
         )

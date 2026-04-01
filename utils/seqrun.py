@@ -242,6 +242,7 @@ class SeqRun:
         runinfo_path: str,
         primer_path: str,
         barcode_path: str,
+        spike_path: str | None = None,
         p7_path: str | None = None,
     ) -> tuple[RunInfo, dict, dict, dict | None]:
         """
@@ -257,6 +258,13 @@ class SeqRun:
         )
         p5_refdict = cls._read_csv_to_dict(primer_path)
         bc_refdict = cls._read_fasta_to_dict(barcode_path)
+        if spike_path:
+            spike_refdict = cls._read_fasta_to_dict(spike_path)
+            bc_refdict = cls._merge_reference_dicts(
+                primary=bc_refdict,
+                extra=spike_refdict,
+                extra_label=spike_path,
+            )
         p7_refdict = None if p7_path is None else cls._read_csv_to_dict(p7_path)
 
         return runinfo, p5_refdict, bc_refdict, p7_refdict
@@ -322,6 +330,26 @@ class SeqRun:
                 sequences[current_header] = "".join(current_seq)
 
         return sequences
+
+    @staticmethod
+    def _merge_reference_dicts(
+        *,
+        primary: dict[str, str],
+        extra: dict[str, str],
+        extra_label: str,
+    ) -> dict[str, str]:
+        """
+        Merge an additional fasta-derived reference dict into the primary set.
+        """
+        overlap = sorted(set(primary).intersection(extra))
+        if overlap:
+            raise ValueError(
+                f"Additional reference {extra_label!r} contains duplicate barcode name(s): {overlap}"
+            )
+
+        merged = primary.copy()
+        merged.update(extra)
+        return merged
 
     # ====================
     # EMIT
@@ -861,11 +889,15 @@ class _ParseRunFastq:
         # Initialize runinfo output table.
         if runinfo_df is None:
             runinfo_df = pd.DataFrame() if runinfo_obj is None else runinfo_obj.copy_raw_df()
+        runinfo_df = qc.format_output_dates(runinfo_df, columns=["Date", "run_date", "samp_date"])
 
         os.makedirs(out_path, exist_ok=True)
 
         # Write full long df for downstream re-use / inspection.
-        seq_run.df.to_csv(os.path.join(out_path, f"{seq_run.run_name}_concat.csv"), index=False)
+        qc.format_output_dates(
+            seq_run.df,
+            columns=["run_date", "samp_date"],
+        ).to_csv(os.path.join(out_path, f"{seq_run.run_name}_concat.csv"), index=False)
 
         # Build matrix and sample-table workbook views.
         group_mats_dict = samp_group_matrices(

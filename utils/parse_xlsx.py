@@ -22,6 +22,26 @@ logger = logging.getLogger(__name__)
 
 #%% Classes
 
+class WorkbookParseError(ValueError):
+    """
+    Raised when an Analysis workbook cannot be parsed into the expected format.
+    """
+    def __init__(self, message: str, *, filepath: str | Path | None = None) -> None:
+        super().__init__(message)
+        self.message = str(message)
+        self.filepath = None if filepath is None else Path(filepath)
+
+    def with_filepath(self, filepath: str | Path) -> "WorkbookParseError":
+        """
+        Return a copy of this error bound to a specific workbook path.
+        """
+        return WorkbookParseError(self.message, filepath=filepath)
+
+    def __str__(self) -> str:
+        if self.filepath is None:
+            return self.message
+        return f"file: {self.filepath}\nreason: {self.message}"
+
 @dataclass
 class ParsedAnalysis:
     """
@@ -135,8 +155,16 @@ class AnalysisWorkbookParser:
     def __init__(self, filepath: str | Path) -> None:
 
         self.filepath: Path = Path(filepath)
-        self._load_xlsx()
-        self._parse_xlsx()
+        try:
+            self._load_xlsx()
+            self._parse_xlsx()
+        except WorkbookParseError as e:
+            raise e.with_filepath(self.filepath) from e
+        except Exception as e:
+            raise WorkbookParseError(
+                f"Unexpected {type(e).__name__}: {e}",
+                filepath=self.filepath,
+            ) from e
 
     def _load_xlsx(self, **kwargs) -> None:
         """
@@ -217,8 +245,10 @@ class AnalysisWorkbookParser:
             (8, 7), # r=8, c=7: pre-refactor non-legacy analysis output
         }
         if (r, c) not in valid_breaks:
-            logger.warning(f"Break detection failed (r={r}, c={c}); skipping sheet.")
-            return []
+            raise WorkbookParseError(
+                "Nonstandard format in samples sheet "
+                f"(r={r}, c={c})."
+            )
 
         header_row = df.iloc[r + 1]
 
@@ -298,8 +328,6 @@ class AnalysisWorkbookParser:
             run_date=self.runinfo.run_date,
         )
 
-        df = self._rebuild_idx_name_from_runinfo(df)
-
         df["run_id"] = df["run_id"].where(df["run_id"].notna(), self.run_id)
 
         return df
@@ -367,6 +395,15 @@ class AnalysisWorkbookParser:
         if sample_meta_df.empty:
             return None, None
 
+        required_cols = {"samp_group", "samp_name", "samp_date", "idx_name", "sample_id"}
+        missing_cols = sorted(required_cols.difference(sample_meta_df.columns))
+        if missing_cols:
+            raise WorkbookParseError(
+                "Runinfo metadata is missing required columns for sample matching. "
+                f"Missing internal fields: {missing_cols}. "
+                "Check your runinfo column names."
+            )
+
         match_df = sample_meta_df.copy()
         for key in ["samp_group", "samp_name"]:
             match_df = match_df.loc[match_df[key] == meta_dict.get(key)]
@@ -381,41 +418,6 @@ class AnalysisWorkbookParser:
             return match_df.iloc[0].get("idx_name"), match_df.iloc[0].get("sample_id")
 
         return None, None
-
-    def _rebuild_idx_name_from_runinfo(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Re-assign idx_name from the workbook's own runinfo after table combine.
-
-        This keeps compile-mode workbook imports aligned with the associated
-        runinfo even if sample blocks were missing idx_name or carried stale ids.
-        """
-        if df.empty:
-            return df
-
-        runinfo_meta = self.runinfo.sample_meta_df.copy()
-        if runinfo_meta.empty:
-            return df
-
-        merge_cols = ["samp_group", "samp_name", "samp_date"]
-        runinfo_meta = runinfo_meta.loc[:, merge_cols + ["idx_name", "sample_id"]].copy()
-        runinfo_meta["samp_date"] = runinfo_meta["samp_date"].apply(normalize_date)
-        runinfo_meta = runinfo_meta.drop_duplicates(subset=merge_cols, keep="last")
-
-        merged = df.merge(
-            runinfo_meta.rename(
-                columns={
-                    "idx_name": "__runinfo_idx_name",
-                    "sample_id": "__runinfo_sample_id",
-                }
-            ),
-            how="left",
-            on=merge_cols,
-        )
-
-        matched = merged["__runinfo_idx_name"].notna()
-        merged.loc[matched, "idx_name"] = merged.loc[matched, "__runinfo_idx_name"]
-        merged.loc[matched, "sample_id"] = merged.loc[matched, "__runinfo_sample_id"]
-        return merged.drop(columns=["__runinfo_idx_name", "__runinfo_sample_id"])
 
 #%%
 """

@@ -51,6 +51,7 @@ class ArgSelectionGUI:
         self.collapse_var = tk.BooleanVar(value=False)
         self.legacy_format_var = tk.BooleanVar(value=False)
         self.collapse_to_parent_var = tk.BooleanVar(value=True)
+        self.append_spike_ref_var = tk.BooleanVar(value=False)
 
         # Initialize IntVars with defaults
         self.mean_qual_var = tk.IntVar(value=30)
@@ -158,6 +159,17 @@ class ArgSelectionGUI:
             frame, text="Dual-index", variable=self.dualindex_var
             )
         self.dualindex_checkbox.pack(side=tk.LEFT, padx=2)
+
+        # Spike reference checkbox
+        frame = tk.Frame(self.req_frame)
+        frame.pack(fill=tk.X, expand=True, pady=2)
+
+        self.append_spike_ref_checkbox = tk.Checkbutton(
+            frame,
+            text="Add Spike",
+            variable=self.append_spike_ref_var,
+            )
+        self.append_spike_ref_checkbox.pack(side=tk.LEFT, padx=2)
         
         # ------------------
         # - Fastq QC frame -
@@ -265,6 +277,17 @@ class ArgSelectionGUI:
             )
         self.dist_threshold_spinbox.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=False)
 
+        # Checkbox for collapse_to_parent
+        frame = tk.Frame(self.dist_frame)
+        frame.pack(fill=tk.X, expand=True, pady=2)
+
+        self.collapse_to_parent_checkbox = tk.Checkbutton(
+            frame,
+            text="Collapse ldist children to parent",
+            variable=self.collapse_to_parent_var,
+            )
+        self.collapse_to_parent_checkbox.pack(side=tk.LEFT, padx=2)
+
         # --------------------------
         # - Excel formatting frame -
         # --------------------------
@@ -298,17 +321,6 @@ class ArgSelectionGUI:
             variable=self.filt_mat_ac_var,
             )
         self.filt_mat_ac_checkbox.pack(side=tk.LEFT, padx=2)
-
-        # Checkbox for collapse_to_parent
-        frame = tk.Frame(self.fmt_frame)
-        frame.pack(fill=tk.X, expand=True, pady=2)
-
-        self.collapse_to_parent_checkbox = tk.Checkbutton(
-            frame,
-            text="Collapse grouped outputs to parent",
-            variable=self.collapse_to_parent_var,
-            )
-        self.collapse_to_parent_checkbox.pack(side=tk.LEFT, padx=2)
 
         # Submit button
         submit_button = tk.Button(
@@ -351,6 +363,7 @@ class ArgSelectionGUI:
         self.args["filt_mat_ac"] = self.filt_mat_ac_var.get()
         self.args["legacy_format"] = self.legacy_format_var.get()
         self.args["collapse_to_parent"] = self.collapse_to_parent_var.get()
+        self.args["append_spike_ref"] = self.append_spike_ref_var.get()
 
         # All required selections are made; close the window
         self.root.quit()
