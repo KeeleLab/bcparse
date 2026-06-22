@@ -1,9 +1,10 @@
-# parse_xlsx.py
+# xlsx.py
 """
-Name:       parse_xlsx.py
+Name:      xlsx.py
 Author:     CAG
 Version:    1.2
 Date:       2026/03/26
+Refactored: 2026/05/26
 """
 
 #%% Imports
@@ -15,8 +16,8 @@ import pandas as pd
 from pathlib import Path
 import logging
 from typing import Dict, List, Optional, Tuple
-from utils.qc_ops import normalize_date, normalize_long_df
-from utils.runinfo import RunInfo, make_run_id
+from bcparse.qc.identity import make_run_id, normalize_date, normalize_long_df
+from bcparse.containers.runinfo import RunInfo
 
 logger = logging.getLogger(__name__)
 
@@ -188,10 +189,10 @@ class AnalysisWorkbookParser:
         # Obtain runinfo from first sheet
         first_sheet = next(iter(self.sheets.values()))
         self.runinfo = RunInfo.from_table(
-            raw_runinfo=self._sheet_to_runinfo_df(first_sheet),
+            raw_df=self._sheet_to_runinfo_df(first_sheet),
             filepath=str(self.filepath),
         )
-        #logger.debug(f"Runinfo meta: {self.runinfo.run_meta}")
+        #logger.debug(f"Runinfo: {self.runinfo.run_id}")
 
         # Process only 'samples' sheets (skip first and non-sample sheets)
         for i, (sname, df) in enumerate(self.sheets.items()):
@@ -207,7 +208,7 @@ class AnalysisWorkbookParser:
         self.run_id = make_run_id(
             self.runinfo.run_number,
             self.filepath.name,
-            self.runinfo.run_name,
+            self.filepath,
         )
 
         self.data_df = self._combine_sample_tables(all_samples)
@@ -274,14 +275,11 @@ class AnalysisWorkbookParser:
             block_df["above_cutoff"] = (is_blank.cumsum() == 0) # this pulls first block, non-derivative and > 1/input
             block_df = block_df[~is_blank].reset_index(drop=True)
 
-            # Add metadata columns
-            for k, v in meta_dict.items():
+            sample_meta = self._resolve_runinfo_sample(meta_dict)
+            for k, v in sample_meta.items():
                 block_df[k] = v
 
-            resolved_idx_name, resolved_sample_id = self._resolve_runinfo_ids(meta_dict)
             block_df["run_number"] = self.runinfo.run_number
-            block_df["idx_name"] = resolved_idx_name
-            block_df["sample_id"] = resolved_sample_id
 
             # Add shorts col if missing
             if c == 6:
@@ -326,6 +324,7 @@ class AnalysisWorkbookParser:
             run_number=self.runinfo.run_number,
             run_name=self.runinfo.run_name,
             run_date=self.runinfo.run_date,
+            source_path=self.filepath,
         )
 
         df["run_id"] = df["run_id"].where(df["run_id"].notna(), self.run_id)
@@ -383,45 +382,29 @@ class AnalysisWorkbookParser:
         else:
             raise ValueError(f"Unrecognized header break row r={r}")
 
-    def _resolve_runinfo_ids(
+    def _resolve_runinfo_sample(
         self,
         meta_dict: Dict[str, Optional[str]],
-    ) -> Tuple[Optional[str], Optional[str]]:
+    ) -> Dict[str, object]:
         """
-        Recover both idx_name and compile-mode sample_id for a sample block by
-        matching its metadata to the workbook's runinfo.
+        Recover runinfo-derived sample metadata for a sample block.
         """
-        sample_meta_df = self.runinfo.sample_meta_df
-        if sample_meta_df.empty:
-            return None, None
-
-        required_cols = {"samp_group", "samp_name", "samp_date", "idx_name", "sample_id"}
-        missing_cols = sorted(required_cols.difference(sample_meta_df.columns))
-        if missing_cols:
-            raise WorkbookParseError(
-                "Runinfo metadata is missing required columns for sample matching. "
-                f"Missing internal fields: {missing_cols}. "
-                "Check your runinfo column names."
-            )
-
-        match_df = sample_meta_df.copy()
-        for key in ["samp_group", "samp_name"]:
+        match_df = self.runinfo.sample_rows
+        for key in ["samp_group", "samp_name", "samp_date"]:
             match_df = match_df.loc[match_df[key] == meta_dict.get(key)]
 
-        target_date = normalize_date(meta_dict.get("samp_date"))
-        if "samp_date" in match_df.columns:
-            match_df = match_df.loc[
-                match_df["samp_date"].apply(normalize_date) == target_date
-            ]
+        if len(match_df) != 1:
+            raise WorkbookParseError(
+                "Could not uniquely match sample sheet metadata to runinfo."
+            )
 
-        if len(match_df) == 1:
-            return match_df.iloc[0].get("idx_name"), match_df.iloc[0].get("sample_id")
-
-        return None, None
+        row = match_df.iloc[0]
+        return row.to_dict()
 
 #%%
 """
 V1.2 
 - add normalize_date() as global function from readers, rather than class function
 - modified to accomodate new downstream model class container runseries.py
+2026-05-26 - Refactored into bcparse package structure
 """

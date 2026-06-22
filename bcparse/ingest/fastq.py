@@ -1,10 +1,11 @@
-# parse_fastq.py
+# fastq.py
 
 """
-Name:       parse_fastq.py
+Name:      fastq.py
 Author:     CAG
 Version:    2.0
 Date:       2026/03/24
+Refactored: 2026/05/26
 """
 
 # %% Imports
@@ -56,7 +57,7 @@ def stream_fastq(file_path: str) -> Generator[Tuple[str, str, str, str], None, N
             pbar.update(rem)
 
 
-def process_fastq_stream(settings: dict):
+def stream_to_countdict(settings: dict):
     """
     Use stream_fastq() and parse_fastq_rec class to collect {idx:{bc:count}}
     """
@@ -383,4 +384,5 @@ class parse_fastq_rec(object):
 - added logic for dual-index X/INT
 1.4 
 - pre-compiled regex patterns, new parameter passing method via settings
+2026-05-26 - Refactored into bcparse package structure
 """

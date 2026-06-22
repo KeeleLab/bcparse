@@ -2,6 +2,11 @@
 # bk_tree.py
 
 """
+Name:       bcparse
+Author:     CAG
+Version:    1.0.1
+Date:       20240605
+
 BK-tree: Approximate string matching under edit or Hamming distance
 ===================================================================
 A lightweight, self-contained implementation of a BK-tree index for
@@ -70,13 +75,55 @@ Notes
 * Designed for composability in larger QC, barcode, or clustering pipelines.
 """
 
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import random
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union, cast
+
 from rapidfuzz import distance as rfdist
 
-#----------
-# Distance 
-#----------
+# ----------
+# Result types
+# ----------
+
+# Added to support type checking and clarity in return types for the query function.
+# The alternative would be to have seperate functions for each return type.
+
+MinOneResult = tuple[Any, int | None]
+MinAllResult = tuple[list[Any], int | None]
+
+OneParallelResult = tuple[list[Any], list[int]]
+OnePairsResult = list[tuple[Any, int]]
+OneMapResult = dict[Any, int]
+
+BatchMinResult = tuple[list[Any | None], list[int | None]]
+BatchParallelResult = tuple[list[list[Any]], list[list[int]]]
+BatchPairsResult = list[list[tuple[Any, int]]]
+BatchMapResult = list[dict[Any, int]]
+EdgeResult = list[tuple[Any, Any, int]]
+
+NearestResult = (
+    MinAllResult
+    | MinOneResult
+    | OneParallelResult
+    | OnePairsResult
+    | OneMapResult
+)
+
+QueryResult = (
+    MinOneResult
+    | MinAllResult
+    | OneParallelResult
+    | OnePairsResult
+    | OneMapResult
+    | BatchMinResult
+    | BatchParallelResult
+    | BatchPairsResult
+    | BatchMapResult
+    | EdgeResult
+)
+
+# ----------
+# Distance
+# ----------
 
 class DistanceSpec:
     """
@@ -85,6 +132,7 @@ class DistanceSpec:
       - Callable via __call__(a,b) -> int
       - Provides probe() / assert_ok() for quick metric checks.
     """
+
     def __init__(self, distance: Union[str, Callable[[str, str], Any]]):
         self._name: Optional[str] = None
         self._fn: Callable[[str, str], int] = self._resolve(distance)
@@ -109,9 +157,12 @@ class DistanceSpec:
             if len(a) != len(b):
                 raise ValueError("Hamming distance requires equal-length strings")
             return int(fn(a, b))
+
         return _h
 
-    def _resolve(self, distance: Union[str, Callable[[str, str], Any]]) -> Callable[[str, str], int]:
+    def _resolve(
+        self, distance: Union[str, Callable[[str, str], Any]]
+    ) -> Callable[[str, str], int]:
         # Direct callable
         if callable(distance):
             # Light sanity: must be int-convertible on trivial input
@@ -133,10 +184,12 @@ class DistanceSpec:
 
             # Case-insensitive lookup under rapidfuzz.distance
             candidates = {
-                k: getattr(rfdist, k) for k in dir(rfdist)
-                if not k.startswith("_")
+                k: getattr(rfdist, k) for k in dir(rfdist) if not k.startswith("_")
             }
-            match = next((v for k, v in candidates.items() if self._normalize_name(k) == name), None)
+            match = next(
+                (v for k, v in candidates.items() if self._normalize_name(k) == name),
+                None,
+            )
             if match is None or not hasattr(match, "distance"):
                 raise ValueError(
                     f"Unknown distance '{distance}'. "
@@ -152,7 +205,9 @@ class DistanceSpec:
             _ = int(d0)
             return lambda a, b: int(match.distance(a, b))
 
-        raise ValueError("distance must be a callable or a string name of a rapidfuzz distance")
+        raise ValueError(
+            "distance must be a callable or a string name of a rapidfuzz distance"
+        )
 
     # ---- metric checks ----
     def probe(
@@ -170,19 +225,19 @@ class DistanceSpec:
         rng = random.Random(rng_seed)
         N = len(seqs)
         if N < 2:
-            return {'nonint': 0, 'identity': 0, 'symmetry': 0, 'triangle': 0}
+            return {"nonint": 0, "identity": 0, "symmetry": 0, "triangle": 0}
 
-        vio = {'nonint': 0, 'identity': 0, 'symmetry': 0, 'triangle': 0}
+        vio = {"nonint": 0, "identity": 0, "symmetry": 0, "triangle": 0}
         # Identity/type
         for _ in range(min(n_pairs, N)):
             a = seqs[rng.randrange(N)]
             try:
                 d_aa = int(self(a, a))
             except Exception:
-                vio['nonint'] += 1
+                vio["nonint"] += 1
                 continue
             if d_aa != 0:
-                vio['identity'] += 1
+                vio["identity"] += 1
 
         # Symmetry
         for _ in range(min(n_pairs, N * (N - 1))):
@@ -194,10 +249,10 @@ class DistanceSpec:
                 dab = int(self(a, b))
                 dba = int(self(b, a))
             except Exception:
-                vio['nonint'] += 1
+                vio["nonint"] += 1
                 continue
             if dab != dba:
-                vio['symmetry'] += 1
+                vio["symmetry"] += 1
 
         # Triangle
         for _ in range(n_triples):
@@ -208,10 +263,10 @@ class DistanceSpec:
                 dbc = int(self(b, c))
                 dac = int(self(a, c))
             except Exception:
-                vio['nonint'] += 1
+                vio["nonint"] += 1
                 continue
             if dac > dab + dbc:
-                vio['triangle'] += 1
+                vio["triangle"] += 1
 
         return vio
 
@@ -227,13 +282,13 @@ class DistanceSpec:
         n_triples: int = 300,
         rng_seed: int = 42,
     ) -> None:
-        vio = self.probe(
-            seqs, n_pairs=n_pairs, n_triples=n_triples, rng_seed=rng_seed
-        )
-        if (vio['nonint'] > max_nonint or
-            vio['identity'] > max_identity or
-            vio['symmetry'] > max_symmetry or
-            vio['triangle'] > max_triangle):
+        vio = self.probe(seqs, n_pairs=n_pairs, n_triples=n_triples, rng_seed=rng_seed)
+        if (
+            vio["nonint"] > max_nonint
+            or vio["identity"] > max_identity
+            or vio["symmetry"] > max_symmetry
+            or vio["triangle"] > max_triangle
+        ):
             raise ValueError(
                 "Distance metric check failed: "
                 f"{vio} (allowed: "
@@ -242,22 +297,30 @@ class DistanceSpec:
 
 
 # --------
-# BK-tree 
+# BK-tree
 # --------
+
 
 class BKNode:
     __slots__ = ("key", "id", "children")
+
     def __init__(self, key: str, id: Any):
         self.key: str = key
         self.id: Any = id
         # children keyed by integer edit distance from this node's key
         self.children: Dict[int, "BKNode"] = {}
 
+
 class BKTree:
-    def __init__(self, distance: Union[str, Callable[[str, str], Any], DistanceSpec] = "Levenshtein"):
+    def __init__(
+        self,
+        distance: Union[str, Callable[[str, str], Any], DistanceSpec] = "Levenshtein",
+    ):
         self.root: Optional[BKNode] = None
-        self.dist = distance if isinstance(distance, DistanceSpec) else DistanceSpec(distance)
-    
+        self.dist = (
+            distance if isinstance(distance, DistanceSpec) else DistanceSpec(distance)
+        )
+
     # --- Dunder methods for introspection and REPL friendliness ---
     def __len__(self) -> int:
         """
@@ -292,7 +355,6 @@ class BKTree:
         name = getattr(self.dist, "name", "custom")
         return f"<BKTree size={len(self)} distance={name!r}>"
 
-
     # ---- construct ----
     def insert(self, key: str, id: Any):
         """Insert (sequence, id) into the BK-tree."""
@@ -321,16 +383,10 @@ class BKTree:
         *,
         max_radius: Optional[int] = None,
         exclude_same_id: bool = True,
-        tie: str = "all",                  # "all" | "first" | "min_id"
-        scope: str = "min",                # "min" | "radius" | "exact"
-        returns: str = "parallel"          # "parallel" | "pairs" | "map" | "single"
-    ) -> Union[
-        Tuple[List[Any], Optional[int]],           # scope=min, tie=all -> (list_of_ids, best_d)
-        Tuple[Any, Optional[int]],                 # scope=min, tie!=all -> (one_id, best_d)
-        Tuple[List[Any], List[int]],               # scope=radius/exact, returns="parallel" -> (list_ids, list_dists)
-        List[Tuple[Any,int]],                      # scope=radius/exact, returns="pairs"
-        Dict[Any,int],                             # scope=radius/exact, returns="map"
-    ]:
+        tie: str = "all",  # "all" | "first" | "min_id"
+        scope: str = "min",  # "min" | "radius" | "exact"
+        returns: str = "parallel",  # "parallel" | "pairs" | "map" | "single"
+    ) -> NearestResult:
         """
         Search the BK-tree for neighbors of query_seq.
 
@@ -369,16 +425,26 @@ class BKTree:
         tie = tie.lower()
         returns = returns.lower()
 
+        if scope not in ("min", "radius", "exact"):
+            raise ValueError('scope must be "min", "radius", or "exact"')
+
+        if scope in ("radius", "exact") and max_radius is None:
+            raise ValueError(f'scope="{scope}" requires max_radius')
+
+        # Returning an empty query result when the tree has no root
         if self.root is None:
             if scope in ("radius", "exact") or tie == "all":
                 # empty collection
-                return ([], None) if scope == "min" else ([], []) if returns == "parallel" else [] if returns == "pairs" else {}
+                return (
+                    ([], None)
+                    if scope == "min"
+                    else ([], [])
+                    if returns == "parallel"
+                    else []
+                    if returns == "pairs"
+                    else {}
+                )
             return (None, None)
-
-        if scope not in ("min", "radius", "exact"):
-            raise ValueError('scope must be "min", "radius", or "exact"')
-        if scope in ("radius", "exact") and max_radius is None:
-            raise ValueError(f'scope="{scope}" requires max_radius')
 
         # Collectors for scope="min"
         best_ids: List[Any] = []
@@ -387,15 +453,17 @@ class BKTree:
         # Collectors for multi-hit scopes (radius/exact)
         ids_multi: List[Any] = []
         dists_multi: List[int] = []
-        pairs_multi: List[Tuple[Any,int]] = []
-        map_multi: Dict[Any,int] = {}
+        pairs_multi: List[Tuple[Any, int]] = []
+        map_multi: Dict[Any, int] = {}
 
         stack = [self.root]
         while stack:
             node = stack.pop()
             d = self.dist(query_seq, node.key)
 
-            is_candidate = ((not exclude_same_id) or (query_id is None) or (node.id != query_id))
+            is_candidate = (
+                (not exclude_same_id) or (query_id is None) or (node.id != query_id)
+            )
 
             if is_candidate:
                 if scope == "min":
@@ -408,6 +476,7 @@ class BKTree:
                             best_ids.append(node.id)
 
                 elif scope == "radius":
+                    assert max_radius is not None
                     if d <= max_radius:
                         # collect per-neighbor distance
                         ids_multi.append(node.id)
@@ -416,6 +485,7 @@ class BKTree:
                         map_multi[node.id] = int(d)  # dedup by id
 
                 else:  # scope == "exact"
+                    assert max_radius is not None
                     if d == max_radius:
                         ids_multi.append(node.id)
                         dists_multi.append(int(d))
@@ -472,7 +542,7 @@ class BKTree:
         items = sorted(uniq.items(), key=lambda kv: (kv[1], str(kv[0])))
 
         if returns == "parallel":
-            ids_sorted  = [k for k, _ in items]
+            ids_sorted = [k for k, _ in items]
             dist_sorted = [int(v) for _, v in items]
             return ids_sorted, dist_sorted
         elif returns == "pairs":
@@ -484,9 +554,11 @@ class BKTree:
             best_k, best_v = items[0]
             return best_k, int(best_v)
 
+
 # -------------------------------
 # Public helpers
 # -------------------------------
+
 
 def build_ref_index(
     ref_ids: List[Any],
@@ -534,21 +606,13 @@ def query(
     query_ids: Union[List[Any], Any],
     query_seqs: Union[List[str], str],
     *,
-    mode: str = "single",                 # "one" | "single" | "all"
+    mode: str = "single",  # "one" | "single" | "all"
     max_radius: Optional[int] = None,
     exclude_same_id: bool = True,
-    scope: str = "min",                   # "min" | "radius" | "exact"
-    tie: str = "min_id",                  # for scope="min": "first" | "min_id" | "all"
-    returns: str = "parallel"             # for multi-hit scopes: "parallel" | "pairs" | "map" | "edges"
-) -> Union[
-    Tuple[Any, Optional[int]],                    # mode="one", scope="min", tie!="all"
-    Tuple[List[Any], Optional[int]],              # mode="one", scope="min", tie="all"
-    Tuple[List[Optional[Any]], List[Optional[int]]],  # mode="single", scope="min"
-    Tuple[List[List[Any]], List[List[int]]],      # mode="single"/"all" with multi-hit returns="parallel"
-    List[List[Tuple[Any,int]]],                   # mode="single"/"all" with returns="pairs"
-    List[Dict[Any,int]],                          # mode="single"/"all" with returns="map"
-    List[Tuple[Any, Any, int]]                    # mode="all" with returns="edges"  -> edge list (qid, nn_id, dist)
-]:
+    scope: str = "min",  # "min" | "radius" | "exact"
+    tie: str = "min_id",  # for scope="min": "first" | "min_id" | "all"
+    returns: str = "parallel",  # for multi-hit scopes: "parallel" | "pairs" | "map" | "edges"
+) -> QueryResult:
     """
     Unified wrapper for batch queries.
       - mode="one":    query a single (id, seq); returns one record as from tree.nearest(...)
@@ -557,7 +621,7 @@ def query(
 
     Notes:
       * For scope="min": 'tie' controls collapsing of ties at the minimal distance.
-      * For scope in {"radius","exact"}: 
+      * For scope in {"radius","exact"}:
           - 'returns' controls shape: "parallel", "pairs", "map", or "edges" (edges only for mode="all")
           - 'tie' is ignored (there is no "best" when you want all within the scope).
     """
@@ -569,12 +633,14 @@ def query(
     # ---- mode="one": accept scalar inputs (or length-1 lists) ----
     if mode == "one":
         if isinstance(query_ids, list):
-            if len(query_ids) != 1: raise ValueError('mode="one" expects a single query_id')
+            if len(query_ids) != 1:
+                raise ValueError('mode="one" expects a single query_id')
             qid = query_ids[0]
         else:
             qid = query_ids
         if isinstance(query_seqs, list):
-            if len(query_seqs) != 1: raise ValueError('mode="one" expects a single query_seq')
+            if len(query_seqs) != 1:
+                raise ValueError('mode="one" expects a single query_seq')
             qseq = query_seqs[0]
         else:
             qseq = query_seqs
@@ -582,11 +648,34 @@ def query(
         # For scope="min": you can use tie="all"/"first"/"min_id"; returns is ignored.
         # For multi-hit scopes: returns controls shape; tie ignored.
         if scope == "min":
-            return tree.nearest(qseq, qid, max_radius=max_radius,
-                                exclude_same_id=exclude_same_id, tie=tie, scope=scope, returns="single")
-        else:
-            return tree.nearest(qseq, qid, max_radius=max_radius,
-                                exclude_same_id=exclude_same_id, tie="all", scope=scope, returns=returns)
+            return cast(
+                MinOneResult | MinAllResult,
+                tree.nearest(
+                    qseq,
+                    qid,
+                    max_radius=max_radius,
+                    exclude_same_id=exclude_same_id,
+                    tie=tie,
+                    scope=scope,
+                    returns="single",
+                ),
+            )
+        raw = tree.nearest(
+            qseq,
+            qid,
+            max_radius=max_radius,
+            exclude_same_id=exclude_same_id,
+            tie="all",
+            scope=scope,
+            returns=returns,
+        )
+        if returns == "parallel":
+            return cast(OneParallelResult, raw)
+        if returns == "pairs":
+            return cast(OnePairsResult, raw)
+        if returns == "map":
+            return cast(OneMapResult, raw)
+        return cast(QueryResult, raw)
 
     # ---- modes requiring vector inputs ----
     if not (isinstance(query_ids, list) and isinstance(query_seqs, list)):
@@ -598,12 +687,22 @@ def query(
 
     # scope="min": 'single' means one best per query (id + dist)
     if scope == "min" and mode == "single":
-        nn_ids:  List[Optional[Any]] = [None] * n
+        nn_ids: List[Optional[Any]] = [None] * n
         nn_dsts: List[Optional[int]] = [None] * n
         for i, (qid, qseq) in enumerate(zip(query_ids, query_seqs)):
-            ans_id, ans_d = tree.nearest(qseq, qid, max_radius=max_radius,
-                                         exclude_same_id=exclude_same_id, tie=tie, scope=scope, returns="single")
-            nn_ids[i]  = ans_id
+            ans_id, ans_d = cast(
+                MinOneResult,
+                tree.nearest(
+                    qseq,
+                    qid,
+                    max_radius=max_radius,
+                    exclude_same_id=exclude_same_id,
+                    tie=tie,
+                    scope=scope,
+                    returns="single",
+                ),
+            )
+            nn_ids[i] = ans_id
             nn_dsts[i] = ans_d if ans_d is not None else None
         return nn_ids, nn_dsts
 
@@ -613,45 +712,84 @@ def query(
         # Build a flat edge list: (query_id, neighbor_id, distance) across all queries
         edges: List[Tuple[Any, Any, int]] = []
         for qid, qseq in zip(query_ids, query_seqs):
-            ids_i, dists_i = tree.nearest(qseq, qid, max_radius=max_radius,
-                                          exclude_same_id=exclude_same_id,
-                                          tie="all", scope=scope, returns="parallel")
+            ids_i, dists_i = cast(
+                OneParallelResult,
+                tree.nearest(
+                    qseq,
+                    qid,
+                    max_radius=max_radius,
+                    exclude_same_id=exclude_same_id,
+                    tie="all",
+                    scope=scope,
+                    returns="parallel",
+                ),
+            )
             for nid, dist in zip(ids_i, dists_i):
                 edges.append((qid, nid, int(dist)))
         return edges
 
     # Otherwise return per-query collections (list-columns friendly)
     if returns == "parallel":
-        all_ids:  List[List[Any]] = [[] for _ in range(n)]
+        all_ids: List[List[Any]] = [[] for _ in range(n)]
         all_dist: List[List[int]] = [[] for _ in range(n)]
         for i, (qid, qseq) in enumerate(zip(query_ids, query_seqs)):
-            ids_i, dists_i = tree.nearest(qseq, qid, max_radius=max_radius,
-                                          exclude_same_id=exclude_same_id,
-                                          tie="all", scope=scope, returns="parallel")
-            all_ids[i]  = ids_i
+            ids_i, dists_i = cast(
+                OneParallelResult,
+                tree.nearest(
+                    qseq,
+                    qid,
+                    max_radius=max_radius,
+                    exclude_same_id=exclude_same_id,
+                    tie="all",
+                    scope=scope,
+                    returns="parallel",
+                ),
+            )
+            all_ids[i] = ids_i
             all_dist[i] = dists_i
         return all_ids, all_dist
 
     elif returns == "pairs":
-        all_pairs: List[List[Tuple[Any,int]]] = [[] for _ in range(n)]
+        all_pairs: List[List[Tuple[Any, int]]] = [[] for _ in range(n)]
         for i, (qid, qseq) in enumerate(zip(query_ids, query_seqs)):
-            pairs_i = tree.nearest(qseq, qid, max_radius=max_radius,
-                                   exclude_same_id=exclude_same_id,
-                                   tie="all", scope=scope, returns="pairs")
+            pairs_i = cast(
+                OnePairsResult,
+                tree.nearest(
+                    qseq,
+                    qid,
+                    max_radius=max_radius,
+                    exclude_same_id=exclude_same_id,
+                    tie="all",
+                    scope=scope,
+                    returns="pairs",
+                ),
+            )
             all_pairs[i] = pairs_i
         return all_pairs
 
     elif returns == "map":
-        all_maps: List[Dict[Any,int]] = [{} for _ in range(n)]
+        all_maps: List[Dict[Any, int]] = [{} for _ in range(n)]
         for i, (qid, qseq) in enumerate(zip(query_ids, query_seqs)):
-            map_i = tree.nearest(qseq, qid, max_radius=max_radius,
-                                 exclude_same_id=exclude_same_id,
-                                 tie="all", scope=scope, returns="map")
+            map_i = cast(
+                OneMapResult,
+                tree.nearest(
+                    qseq,
+                    qid,
+                    max_radius=max_radius,
+                    exclude_same_id=exclude_same_id,
+                    tie="all",
+                    scope=scope,
+                    returns="map",
+                ),
+            )
             all_maps[i] = map_i
         return all_maps
 
     else:
-        raise ValueError('returns must be one of "parallel", "pairs", "map", or "edges"')
+        raise ValueError(
+            'returns must be one of "parallel", "pairs", "map", or "edges"'
+        )
+
 
 # %% Usage Notes
 
@@ -769,8 +907,8 @@ ref_tree <- bk$build_ref_index(ids, seqs)
 
 # Query the tree
 res <- bk$query(
-  tree = ref_tree, 
-  query_ids = ids, 
+  tree = ref_tree,
+  query_ids = ids,
   query_seqs = seqs,
   mode = "all",
   tie = "all",
@@ -779,4 +917,11 @@ res <- bk$query(
   exclude_same_id = T,
   returns = "edges"
 )
+"""
+
+#%% Version history
+
+"""
+1.0.1 - Minor docstring and type annotation improvements.
+1.0.0 - Initial release of bk_tree.py with BK-tree implementation, distance metric support, and query interface.
 """

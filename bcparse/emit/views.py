@@ -1,9 +1,10 @@
-# data_views.py
+# views.py
 """
-Name:       data_views.py
+Name:      views.py
 Author:     CAG
 Version:    1.0
 Date:       2026/03/26
+Refactored: 2026/05/26
 
 Functions for reshaping emitted dataframes into viewer-friendly formats.
 Lifted from deprecated io.py.
@@ -15,9 +16,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-import utils.qc_ops as qc
-from utils.runseries import RunSeries
-from utils.seqrun import SeqRun
+import bcparse.qc as qc
+from bcparse.containers.runseries import RunSeries
+from bcparse.containers.seqrun import SeqRun
 
 #%%
 
@@ -44,8 +45,6 @@ def sidelong_tables(df: pd.DataFrame, legacy_format: bool = False):
     """
     Format viewer-oriented sidelong sample tables from a SeqRun-style dataframe.
     """
-    df = qc.normalize_long_df(df)
-
     if df.empty:
         return {}, {}
 
@@ -270,7 +269,9 @@ def samp_group_matrices(seq_run: SeqRun, filt_ac=False, collapse_to_parent=False
     else:
         df = seq_run.df.copy()
 
-    df = qc.format_output_dates(df, columns=["run_date", "samp_date"])
+    df[["run_date", "samp_date"]] = df[["run_date", "samp_date"]].apply(
+        lambda col: col.apply(qc.normalize_date)
+    )
 
     # Get distinct {samp_group: [idx_name(s)]}
     groups = df.groupby("samp_group")["idx_name"].unique().to_dict()
@@ -336,7 +337,11 @@ def group_mat_dict(df_ac: pd.DataFrame):
     """
     Format a dict of per-group above-cutoff sample matrices.
     """
-    df = qc.format_output_dates(df_ac, columns=["run_date", "samp_date"])
+    df = df_ac.copy()
+    df[["run_date", "samp_date"]] = df[["run_date", "samp_date"]].apply(
+        lambda col: col.apply(qc.normalize_date)
+    )
+
     df_dict = {k: v for k, v in df.groupby("samp_group")}
     mat_dict = {}
 
@@ -387,7 +392,10 @@ def contam_report(df_ac: pd.DataFrame):
     """
     Format full-matrix and contamination report outputs for a compiled series.
     """
-    df = qc.format_output_dates(df_ac, columns=["run_date", "samp_date"])
+    df = df_ac.copy()
+    df[["run_date", "samp_date"]] = df[["run_date", "samp_date"]].apply(
+        lambda col: col.apply(qc.normalize_date)
+    )
 
     df["n_groups"] = df.groupby("bc_name")["samp_group"].transform("nunique")
     df["n_samps"] = df.groupby("bc_name")["samp_name"].transform("nunique")
@@ -446,65 +454,21 @@ def concat_series_runinfo(run_series: RunSeries) -> pd.DataFrame:
         if runinfo is None:
             continue
 
-        runinfo_df = qc.format_output_dates(runinfo.copy_raw_df(), columns=["Date", "run_date", "samp_date"])
+        runinfo_df = runinfo.copy_raw_df()
+        runinfo_df["Date"] = runinfo_df["Date"].apply(qc.normalize_date)
+
         if runinfo_df.empty:
             continue
 
         if runinfo_df.columns.size > 0 and str(runinfo_df.columns[0]).strip() == "Run Number":
             runinfo_df = runinfo_df.iloc[:, 1:].copy()
 
-        runinfo_df = runinfo_df.replace(r"^\s*$", np.nan, regex=True).dropna(how="all")
+        runinfo_df = runinfo_df.mask(
+            runinfo_df.map(lambda x: isinstance(x, str) and x.strip() == ""),
+            np.nan,
+        ).dropna(how="all")
         if runinfo_df.empty:
             continue
-
-        # Attempt to resolve sample_id from idx_name and add notes for any discrepancies between resolved and existing sample_id.
-        sample_meta_df = runinfo.sample_meta_df.copy()
-        if not sample_meta_df.empty:
-            resolved_ids = (
-                seq_run.df.loc[:, ["idx_name", "sample_id"]]
-                .dropna(subset=["idx_name", "sample_id"])
-                .drop_duplicates(subset=["idx_name"], keep="last")
-                .rename(columns={"sample_id": "__resolved_sample_id"})
-            )
-            sample_meta_df = sample_meta_df.merge(
-                resolved_ids,
-                how="left",
-                on="idx_name",
-            )
-
-            raw_idx_col = runinfo.full_index_col
-            if raw_idx_col in runinfo_df.columns:
-                note_map_df = sample_meta_df.loc[
-                    sample_meta_df["__resolved_sample_id"].notna()
-                    & sample_meta_df["sample_id"].notna()
-                    & sample_meta_df["__resolved_sample_id"].astype(str).ne(sample_meta_df["sample_id"].astype(str)),
-                    ["idx_name", "__resolved_sample_id"],
-                ].drop_duplicates(subset=["idx_name"], keep="last")
-
-                if not note_map_df.empty:
-                    note_map = dict(
-                        zip(
-                            note_map_df["idx_name"].astype(str),
-                            note_map_df["__resolved_sample_id"].astype(str),
-                        )
-                    )
-
-                    notes_col = "notes" if "notes" in runinfo_df.columns else "Notes" if "Notes" in runinfo_df.columns else "notes"
-                    if notes_col not in runinfo_df.columns:
-                        runinfo_df[notes_col] = np.nan
-
-                    row_idx_mask = runinfo_df[raw_idx_col].notna()
-                    mapped_ids = runinfo_df.loc[row_idx_mask, raw_idx_col].astype(str).map(note_map)
-                    hit_mask = mapped_ids.notna()
-
-                    if hit_mask.any():
-                        existing_notes = runinfo_df.loc[row_idx_mask, notes_col].fillna("").astype(str)
-                        appended_notes = existing_notes.where(
-                            existing_notes.eq(""),
-                            existing_notes + " | ",
-                        ) + "compiled sample_id: " + mapped_ids.fillna("")
-                        runinfo_df.loc[row_idx_mask, notes_col] = existing_notes
-                        runinfo_df.loc[runinfo_df.loc[row_idx_mask].index[hit_mask], notes_col] = appended_notes.loc[hit_mask]
 
         run_number = seq_run.run_number
         if pd.isna(run_number):
@@ -518,3 +482,8 @@ def concat_series_runinfo(run_series: RunSeries) -> pd.DataFrame:
         return pd.DataFrame()
 
     return pd.concat(runinfo_dfs, ignore_index=True)
+
+#%% Versions
+"""
+2026-05-26 - Refactored into bcparse package structure
+"""

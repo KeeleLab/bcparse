@@ -18,8 +18,12 @@ dist/
 venv/
 env/
 
-# uv
-.python-version
+# Tool caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+.tox/
 
 # IDE
 .vscode/
@@ -27,8 +31,8 @@ env/
 *.code-workspace
 
 # Bundled separately, distributed alongside the package
-_misc_/
-ref/
+**/_misc_/
+**/ref/
 
 # Local workspace
 _sampledata/

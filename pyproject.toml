@@ -1,0 +1,58 @@
+[project]
+name = "bcparse"
+version = "4.2"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.4.6",
+    "openpyxl>=3.1.5",
+    "pandas>=3.0.3",
+    "rapidfuzz>=3.14.5",
+    "regex>=2026.5.9",
+    "tqdm>=4.68.3",
+]
+
+[project.scripts]
+bcparse = "bcparse.__main__:cli"
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bcparse*"]
+
+[tool.setuptools.package-data]
+bcparse = [
+    "ref/*",
+    "_misc_/*",
+    "_misc_/_for_R/*",
+    "_misc_/_harnesses/*",
+    "_misc_/_mermaid/*",
+    "_misc_/_templates/*",
+    "_misc_/_templates/multi_sample_run/*",
+]
+
+[tool.ruff]
+target-version = "py313"
+extend-exclude = ["bcparse/_misc_"]
+
+[tool.basedpyright]
+typeCheckingMode = "basic"
+reportAny = false
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportMissingTypeArgument = false
+reportDeprecated = false
+reportArgumentType = "warning"
+reportOptionalIterable = "warning"
+reportGeneralTypeIssues = "warning"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.39.8",
+    "pandas-stubs>=3.0.3.260530",
+    "pytest>=9.1.0",
+    "ruff>=0.15.18",
+]
