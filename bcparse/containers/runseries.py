@@ -2,53 +2,48 @@
 """
 Name:       runseries.py
 Author:     CAG
-Version:    2.0
-Date:       2026/05/21
-Refactored: 2026/05/26
+Version:    2.1.0
+Date:       2026/06/23
 
-`RunSeries` is the top-level model used by compile mode:
-- n `SeqRun` objects + a cached raw compiled long dataframe
-- round-trip construction from canonical long-format data
+`RunSeries` is the top-level model used by compile mode, holding a series of `SeqRun` objects.
 """
 
-#%% Imports
+# %% Imports
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 import pandas as pd
 
 from bcparse.containers.runinfo import RunInfo
 from bcparse.containers.seqrun import SeqRun
 
-#%% RunSeries model
+# %% RunSeries model
+
 
 class RunSeries:
     """
     Container for a series of sequencing runs.
     Holds multi-run compiled data and per-run metadata for compile mode.
 
-    Identity contract for compile mode:
-    - samples are identified by `sample_id`
-    - `sample_id` is the composite group/name/date/run_number identity
-    - `idx_name` remains index metadata, not the sample identity contract
+    Identity contracts for compile mode:
+    - samples are identified by `sample_id`; composite group::name::date::run_number
+    - runs are identified by `run_id`; composite run_name::run_number
     """
 
     def __init__(
         self,
-        runs: dict[str, SeqRun] | Iterable[SeqRun] | None = None,
-        series_meta: dict[str, Any] | None = None,
-        data_df: pd.DataFrame | None = None,
-        runinfo_by_run_id: dict[str, RunInfo] | None = None,
+        runs: dict[str, SeqRun],
+        series_meta: dict[str, Any],
+        data_df: pd.DataFrame,
+        runinfo_by_run_id: dict[str, RunInfo],
         source: str = "unknown",
     ):
-        self.runs             = self._coerce_runs(runs or {})
-        self.series_meta      = dict(series_meta or {})
-        self.data_df          = None if data_df is None else data_df.copy()
-        self.runinfo_by_run_id = {
-            str(k): v for k, v in (runinfo_by_run_id or {}).items() if v is not None
-        }
+        self.runs = {str(run_id): run for run_id, run in runs.items()}
+        self.series_meta = dict(series_meta)
+        self.data_df = data_df.copy()
+        self.runinfo_by_run_id = {str(k): v for k, v in runinfo_by_run_id.items()}
         self.source = source
 
     # ====================
@@ -60,18 +55,21 @@ class RunSeries:
         cls,
         df: pd.DataFrame,
         *,
+        runinfo_by_run_id: dict[str, RunInfo],
         source: str = "unknown",
-        runinfo_by_run_id: dict[str, RunInfo] | None = None,
     ) -> "RunSeries":
         """
         Materialize a RunSeries from a normalized long-format dataframe.
         Splits by run identity and builds one SeqRun per run.
         """
-        ri = runinfo_by_run_id or {}
+        ri = runinfo_by_run_id
+        # Base CSVs can pass an empty runinfo map; compile.py fills it later
+        # with ensure_runinfo().
 
-        if df.empty:
-            return cls(runinfo_by_run_id=ri, source=source)
+        if df.empty:  # safeguard if called directly for some reason
+            raise ValueError("RunSeries.from_long_df requires a non-empty dataframe.")
 
+        # Split by run_id and build SeqRun objects
         runs = {
             str(run_id): SeqRun.from_long_df(
                 run_df,
@@ -81,28 +79,14 @@ class RunSeries:
             for run_id, run_df in df.groupby("run_id", sort=False)
         }
 
+        # Return a RunSeries object with the runs, series metadata, and the original dataframe
         return cls(
             runs=runs,
             series_meta={"groupby_col": "run_id"},
+            data_df=df,
             runinfo_by_run_id=ri,
             source=source,
         )
-
-    @staticmethod
-    def _coerce_runs(runs: Mapping[str, SeqRun] | Iterable[SeqRun]) -> dict[str, SeqRun]:
-        """Normalize runs to {run_id: SeqRun}."""
-        items = (
-            list(runs.items())
-            if isinstance(runs, Mapping)
-            else [(run.run_id, run) for run in runs]
-        )
-        run_ids = [str(run_id) for run_id, _ in items]
-
-        dup_ids = sorted({run_id for run_id in run_ids if run_ids.count(run_id) > 1})
-        if dup_ids:
-            raise ValueError(f"Duplicate run_id in RunSeries: {', '.join(dup_ids)}")
-
-        return dict(zip(run_ids, [run for _, run in items]))
 
     # ====================
     # EMIT
@@ -122,22 +106,52 @@ class RunSeries:
 
     @property
     def df(self) -> pd.DataFrame:
-        if self.data_df is not None:
-            return self.data_df.copy()
-        if not self.runs:
-            return pd.DataFrame()
-        return pd.concat([run.df for run in self.run_list], ignore_index=True)
+        return self.data_df.copy()
 
-#%% Versions
+
+# %% Repository usage notes
 """
-v1.0 
-- Initial version, accomodating new model/container structure
-- Supercedes deprecated xlsx_compiler module and associated code in bcParse.py
+RunSeries is the compile-mode top-level container. It represents a
+deduplicated series of sequencing runs after compile.py has normalized,
+merged, and QC-annotated long-format input data.
 
-v2.0
-- Plain class replacing dataclass
-- copy() and collapse_samples_in_place() removed; emit_qc works directly from sample_list
-- Compile path collapsed from ~15 staticmethods to build_from_parsed_files + _dedup + _core_qc
-- sample_id is the compile deduplication contract
-2026-05-26 - Refactored into bcparse package structure
+Construction:
+ - ingest/compile.py is the only current external construction path.
+ - build_runseries() creates a final combined long dataframe, then calls
+   RunSeries.from_long_df().
+ - from_long_df() splits the dataframe by run_id and builds one SeqRun per run.
+ - Empty dataframes are invalid here; compile.py should fail before calling
+   this constructor if no usable input data exists.
+
+Stored state:
+ - runs is the canonical {run_id: SeqRun} mapping.
+ - data_df is the cached compiled long dataframe used by the df property.
+ - series_meta stores compile-level metadata such as groupby_col, out_prefix,
+   and n_source_runs.
+ - runinfo_by_run_id stores per-run RunInfo objects after compile finalization.
+
+Downstream consumers:
+ - emit/workbooks.py uses RunSeries for compile workbook and CSV output.
+ - emit/workbooks.py::emit_qc() consumes run_list or df depending on whether
+   collapse_to_parent is enabled.
+ - emit/views.py::concat_series_runinfo() walks run_list and concatenates each
+   run's raw runinfo table for compile output.
+"""
+
+# %% Versions
+"""
+v2.1.0 20260623
+ - Dropped over-flexible input types in lieu of trusting upstream contract
+ - Formatting and comments
+
+v2.0.0 20260526
+ - Plain class replacing dataclass
+ - copy() and collapse_samples_in_place() removed; emit_qc works directly from sample_list
+ - Compile path collapsed from ~15 staticmethods to build_from_parsed_files + _dedup + _core_qc
+ - sample_id is the compile deduplication contract
+ - Refactored into bcparse package structure
+
+v1.0.0
+ - Initial version, accomodating new model/container structure
+ - Supercedes deprecated xlsx_compiler flow pre-v4
 """

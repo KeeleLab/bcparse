@@ -2,7 +2,7 @@
 """
 Name:      views.py
 Author:     CAG
-Version:    1.0
+Version:    1.1.0
 Date:       2026/03/26
 Refactored: 2026/05/26
 
@@ -10,7 +10,7 @@ Functions for reshaping emitted dataframes into viewer-friendly formats.
 Lifted from deprecated io.py.
 """
 
-#%% Imports
+# %% Imports
 from __future__ import annotations
 
 import numpy as np
@@ -20,7 +20,8 @@ import bcparse.qc as qc
 from bcparse.containers.runseries import RunSeries
 from bcparse.containers.seqrun import SeqRun
 
-#%%
+# %%
+
 
 def _legacy_bool_string(value) -> str:
     if pd.isna(value):
@@ -76,9 +77,15 @@ def sidelong_tables(df: pd.DataFrame, legacy_format: bool = False):
     for split_id, split_df in split_dfs.items():
         # Prefer the native analysis-pipe parent column, but fall back to the
         # workbook-imported ldist column when compiling from Analysis.xlsx.
-        if "putative_parent" in split_df.columns and split_df["putative_parent"].notna().any():
+        if (
+            "putative_parent" in split_df.columns
+            and split_df["putative_parent"].notna().any()
+        ):
             parent_col = "putative_parent"
-        elif "ldist_samp_lvl" in split_df.columns and split_df["ldist_samp_lvl"].notna().any():
+        elif (
+            "ldist_samp_lvl" in split_df.columns
+            and split_df["ldist_samp_lvl"].notna().any()
+        ):
             parent_col = "ldist_samp_lvl"
         else:
             parent_col = None
@@ -120,22 +127,30 @@ def sidelong_tables(df: pd.DataFrame, legacy_format: bool = False):
 
         # Bitpack
         df_body["flag"] = (
-            c1.astype(int) * 8    # 8: above_cutoff
+            c1.astype(int) * 8  # 8: above_cutoff
             + c2.astype(int) * 4  # 4: has parent
             + c3.astype(int) * 2  # 2: Unique
-            + c4.astype(int)      # 1: Spike
+            + c4.astype(int)  # 1: Spike
         )
 
-        df_body["rowgroup"] = df_body["flag"].map({
-            8: 0,    # Above cutoff, no parent, named
-            10: 0,   # Above cutoff, no parent, Unique
-            9: 1,    # Above cutoff, no parent, Spike
-            12: 1,   # Above cutoff, has parent, named
-            13: 1,   # Above cutoff, has parent, Spike
-            14: 1,   # Above cutoff, has parent, Unique
-        }).fillna(2)
+        df_body["rowgroup"] = (
+            df_body["flag"]
+            .map(
+                {
+                    8: 0,  # Above cutoff, no parent, named
+                    10: 0,  # Above cutoff, no parent, Unique
+                    9: 1,  # Above cutoff, no parent, Spike
+                    12: 1,  # Above cutoff, has parent, named
+                    13: 1,  # Above cutoff, has parent, Spike
+                    14: 1,  # Above cutoff, has parent, Unique
+                }
+            )
+            .fillna(2)
+        )
 
-        df_body = df_body.sort_values(by=["rowgroup", "proportion"], ascending=[True, False]).reset_index(drop=True)
+        df_body = df_body.sort_values(
+            by=["rowgroup", "proportion"], ascending=[True, False]
+        ).reset_index(drop=True)
 
         # Recalculate group 0's proportions to total 1.
         ac_tot_prop = df_body.loc[df_body["rowgroup"] == 0, "proportion"].sum()
@@ -144,13 +159,17 @@ def sidelong_tables(df: pd.DataFrame, legacy_format: bool = False):
         else:
             df_body.loc[df_body["rowgroup"] == 0, "proportion"] = 0
 
-        changes = df_body.index[df_body["rowgroup"] != df_body["rowgroup"].shift()].tolist()
+        changes = df_body.index[
+            df_body["rowgroup"] != df_body["rowgroup"].shift()
+        ].tolist()
         if changes:
             changes.pop(0)
 
         pad = pd.DataFrame([[np.nan] * len(df_body.columns)], columns=df_body.columns)
         for index in sorted(changes, reverse=True):
-            df_body = pd.concat([df_body.iloc[:index], pad, df_body.iloc[index:]], ignore_index=True)
+            df_body = pd.concat(
+                [df_body.iloc[:index], pad, df_body.iloc[index:]], ignore_index=True
+            )
 
         df_body = df_body.drop(["flag", "rowgroup", "above_cutoff"], axis=1)
 
@@ -161,15 +180,17 @@ def sidelong_tables(df: pd.DataFrame, legacy_format: bool = False):
             df_body["short_bc"] = df_body["short_bc"].astype(object)
             nan_mask = ~df_body["bc_name"].isna()
 
-            df_body.loc[nan_mask, "short_bc"] = df_body.loc[
-                nan_mask, "short_bc"
-            ].map(_legacy_bool_string)
+            df_body.loc[nan_mask, "short_bc"] = df_body.loc[nan_mask, "short_bc"].map(
+                _legacy_bool_string
+            )
 
             df_body.loc[~nan_mask, "x_idx"] = ""
             df_body.loc[~nan_mask, "short_bc"] = ""
 
             df_body.loc[nan_mask, "putative_parent"] = (
-                df_body.loc[nan_mask, "putative_parent"].fillna("NA-NA").map(lambda x: f"{x}" if x != "NA-NA" else x)
+                df_body.loc[nan_mask, "putative_parent"]
+                .fillna("NA-NA")
+                .map(lambda x: f"{x}" if x != "NA-NA" else x)
             )
 
             df_body = df_body.rename(
@@ -187,7 +208,9 @@ def sidelong_tables(df: pd.DataFrame, legacy_format: bool = False):
             df_body["short_bc"] = df_body["short_bc"].map(_display_bool_or_blank)
 
         new_cols = [f"{i}" for i in range(len(df_body.columns) + 1)]
-        df_body = pd.concat([pd.DataFrame([df_body.columns], columns=df_body.columns), df_body]).reset_index(drop=True)
+        df_body = pd.concat(
+            [pd.DataFrame([df_body.columns], columns=df_body.columns), df_body]
+        ).reset_index(drop=True)
 
         for i in range(len(new_cols) - len(df_body.columns)):
             df_body[i] = np.nan
@@ -202,7 +225,9 @@ def sidelong_tables(df: pd.DataFrame, legacy_format: bool = False):
         for key in header_keys:
             values = split_df[key].drop_duplicates()
             if len(values) != 1:
-                raise ValueError(f"{key} has multiple values in {split_key}={split_id}: {values.tolist()}")
+                raise ValueError(
+                    f"{key} has multiple values in {split_key}={split_id}: {values.tolist()}"
+                )
             header_dict[key] = values.iloc[0]
 
         for key in ["run_date", "samp_date"]:
@@ -231,7 +256,10 @@ def sidelong_tables(df: pd.DataFrame, legacy_format: bool = False):
                     header_dict["input"],
                     split_df["bc_count"].sum(),
                     split_df[~split_df["bc_name"].str.contains("Unique")].shape[0],
-                    split_df[split_df["bc_name"].str.contains("Unique")]["bc_count"].sum() / split_df["bc_count"].sum(),
+                    split_df[split_df["bc_name"].str.contains("Unique")][
+                        "bc_count"
+                    ].sum()
+                    / split_df["bc_count"].sum(),
                 ]
                 + [np.nan] * (len(new_cols) - 4),
                 [np.nan] * len(new_cols),
@@ -300,11 +328,13 @@ def samp_group_matrices(seq_run: SeqRun, filt_ac=False, collapse_to_parent=False
             )
 
             # filter above cutoff rows
-            df_filt = df_filt[df_filt["flag"].isin([8, 10])].copy() # Only include above_cutoff barcodes without parents, excluding Spikes but including Uniques, to match sidelong table logic.
+            df_filt = df_filt[
+                df_filt["flag"].isin([8, 10])
+            ].copy()  # Only include above_cutoff barcodes without parents, excluding Spikes but including Uniques, to match sidelong table logic.
 
             # recalculate proportions based on above_cutoff data
-            df_filt["proportion"] = (
-                df_filt.groupby("idx_name")["proportion"].transform(lambda x: x / x.sum())
+            df_filt["proportion"] = df_filt.groupby("idx_name")["proportion"].transform(
+                lambda x: x / x.sum()
             )
         else:
             df_filt = df[(df["idx_name"].isin(idx_names))]
@@ -359,7 +389,9 @@ def group_mat_dict(df_ac: pd.DataFrame):
         dup_mask = samp_df.duplicated(subset=key_cols, keep=False)
 
         if dup_mask.any():
-            dup_rows = samp_df.loc[dup_mask].sort_values(key_cols)[key_cols + ["proportion"]]
+            dup_rows = samp_df.loc[dup_mask].sort_values(key_cols)[
+                key_cols + ["proportion"]
+            ]
             raise ValueError(
                 f"Duplicate rows detected in samp_group={samp_group}; cannot pivot.\n"
                 f"Offending rows:\n{dup_rows.to_string(index=False)}"
@@ -406,7 +438,14 @@ def contam_report(df_ac: pd.DataFrame):
     full_mat = (
         df.pivot(
             index=["bc_name", "bc_seq", "ldist_all", "n_groups", "n_samps"],
-            columns=["samp_group", "samp_name", "samp_date", "run_number", "filename", "input"],
+            columns=[
+                "samp_group",
+                "samp_name",
+                "samp_date",
+                "run_number",
+                "filename",
+                "input",
+            ],
             values="proportion",
         )
         .fillna(0)
@@ -422,13 +461,23 @@ def contam_report(df_ac: pd.DataFrame):
     ).reset_index(drop=True)
 
     agg_df = (
-        df.groupby(["bc_name", "bc_seq", "n_groups", "ldist_all", "short_bc", "samp_group"], dropna=False)
-        .agg(n_samp_per_group=("samp_name", "nunique"), group_adj_count=("adj_count", "sum"))
+        df.groupby(
+            ["bc_name", "bc_seq", "n_groups", "ldist_all", "short_bc", "samp_group"],
+            dropna=False,
+        )
+        .agg(
+            n_samp_per_group=("samp_name", "nunique"),
+            group_adj_count=("adj_count", "sum"),
+        )
         .reset_index()
     )
 
     contam_df = (
-        agg_df.assign(total_adj_count_animal=agg_df.groupby("samp_group")["group_adj_count"].transform("sum"))
+        agg_df.assign(
+            total_adj_count_animal=agg_df.groupby("samp_group")[
+                "group_adj_count"
+            ].transform("sum")
+        )
         .assign(group_prop=lambda d: d["group_adj_count"] / d["total_adj_count_animal"])
         .query("n_groups > 1")
         .pivot(
@@ -451,24 +500,20 @@ def concat_series_runinfo(run_series: RunSeries) -> pd.DataFrame:
 
     for seq_run in run_series.run_list:
         runinfo = seq_run.runinfo
-        if runinfo is None:
-            continue
+        assert runinfo is not None
 
         runinfo_df = runinfo.copy_raw_df()
         runinfo_df["Date"] = runinfo_df["Date"].apply(qc.normalize_date)
+        runinfo_df = _fill_compile_sample_ids(runinfo_df, runinfo)
+        runinfo_df = _fill_compile_sources(runinfo_df, seq_run.df)
 
-        if runinfo_df.empty:
-            continue
-
-        if runinfo_df.columns.size > 0 and str(runinfo_df.columns[0]).strip() == "Run Number":
+        if str(runinfo_df.columns[0]).strip() == "Run Number":
             runinfo_df = runinfo_df.iloc[:, 1:].copy()
 
         runinfo_df = runinfo_df.mask(
             runinfo_df.map(lambda x: isinstance(x, str) and x.strip() == ""),
             np.nan,
         ).dropna(how="all")
-        if runinfo_df.empty:
-            continue
 
         run_number = seq_run.run_number
         if pd.isna(run_number):
@@ -478,12 +523,44 @@ def concat_series_runinfo(run_series: RunSeries) -> pd.DataFrame:
         runinfo_df.insert(0, "run_name", seq_run.run_name or runinfo.run_name)
         runinfo_dfs.append(runinfo_df)
 
-    if not runinfo_dfs:
-        return pd.DataFrame()
-
     return pd.concat(runinfo_dfs, ignore_index=True)
 
-#%% Versions
+
+def _fill_compile_sample_ids(runinfo_df: pd.DataFrame, runinfo) -> pd.DataFrame:
+    """Fill sample_id in a raw runinfo-shaped table from normalized sample_rows."""
+    df = runinfo_df.copy()
+    sample_rows = runinfo.sample_rows[["idx_name", "sample_id"]].dropna().copy()
+    sample_rows["idx_name"] = sample_rows["idx_name"].astype(str)
+    sample_id_by_idx = sample_rows.drop_duplicates(
+        subset=["idx_name"], keep="last"
+    ).set_index("idx_name")["sample_id"]
+    sample_ids = runinfo.index_key_for_output(df).astype("string").map(sample_id_by_idx)
+
+    if "sample_id" not in df.columns:
+        df["sample_id"] = pd.NA
+    df["sample_id"] = df["sample_id"].where(df["sample_id"].notna(), sample_ids)
+    return df
+
+
+def _fill_compile_sources(
+    runinfo_df: pd.DataFrame, run_df: pd.DataFrame
+) -> pd.DataFrame:
+    df = runinfo_df.copy()
+    source_by_sample_id = (
+        run_df[["sample_id", "__compile_source_note"]]
+        .dropna()
+        .drop_duplicates(subset=["sample_id"], keep="last")
+        .set_index("sample_id")["__compile_source_note"]
+    )
+    df["source"] = df["sample_id"].map(source_by_sample_id)
+    return df
+
+
+# %% Versions
 """
-2026-05-26 - Refactored into bcparse package structure
+v1.1.0 20260623
+ - Added provisions to fill compiled runinfo sample_id and source columns.
+
+v1.0.0 20260526
+ - Refactored into bcparse package structure
 """

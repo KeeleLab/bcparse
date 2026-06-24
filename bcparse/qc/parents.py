@@ -2,28 +2,31 @@
 """
 Name:       parents.py
 Author:     CAG
-Version:    3.0
-Date:       2026/03/20
-Refactored: 2026/05/26
+Version:    3.1.0
+Date:       20260623
 
 Consolidating qc functions for processing barcode data.
 These are used across the parse- and compile-side build pipelines.
 """
 
-#%% Imports
+# %% Imports
 from __future__ import annotations
+
 from typing import Callable, Optional
+
 import numpy as np
 import pandas as pd
 from rapidfuzz.distance import Levenshtein
+
 from bcparse.lib.bk_tree import build_ref_index, query
 
-#%% Parent ID 
+# %% Parent ID
+
 
 def flag_putative_parents(
     settings: dict,
     set_name: str,
-    df: 'pd.DataFrame',
+    df: "pd.DataFrame",
     bc_name_col: str = "bc_name",
     bc_seq_col: str = "bc_seq",
     bc_count_col: str = "bc_count",
@@ -32,7 +35,9 @@ def flag_putative_parents(
     aggr: bool = False,
     proportion_col: str = "proportion",
     input_col: str = "input",
-    ) -> 'pd.DataFrame':
+    # optional args for console reporting
+    print_header: bool = True,
+) -> "pd.DataFrame":
     """
     Annotate df with 'putative_parent' column indicating lineage origin.
     """
@@ -46,7 +51,6 @@ def flag_putative_parents(
 
     # Optional preprocessing for `aggr` runs
     if aggr:
-
         # Replace inf or NaN with 10
         df_c[input_col] = df_c[input_col].replace([np.inf, np.nan], 10)
 
@@ -56,9 +60,9 @@ def flag_putative_parents(
         # Aggregate adjusted counts by barcode
         df_c = (
             df_c.groupby([bc_name_col, bc_seq_col], as_index=False)
-            .agg({'adj_count': 'sum'})
-            .rename(columns={'adj_count': bc_count_col})
-            )
+            .agg({"adj_count": "sum"})
+            .rename(columns={"adj_count": bc_count_col})
+        )
 
     # Subset named and unique
     df_n = df_c[~df_c[bc_name_col].str.startswith("Unique", na=False)]
@@ -66,35 +70,40 @@ def flag_putative_parents(
 
     # Get numpy arrays for vectorized / indexed access
     # Named
-    n_seqs   = df_n[bc_seq_col].astype(str).to_numpy()
+    n_seqs = df_n[bc_seq_col].astype(str).to_numpy()
     n_counts = df_n[bc_count_col].astype(int).to_numpy()
-    n_names  = df_n[bc_name_col].astype(object).to_numpy()
+    n_names = df_n[bc_name_col].astype(object).to_numpy()
     # Unique
-    u_seqs   = df_u[bc_seq_col].astype(str).to_numpy()
+    u_seqs = df_u[bc_seq_col].astype(str).to_numpy()
     u_counts = df_u[bc_count_col].astype(int).to_numpy()
-    u_names  = df_u[bc_name_col].astype(object).to_numpy()
+    u_names = df_u[bc_name_col].astype(object).to_numpy()
 
     # Build ref tree on named
-    print(f"{set_name}", flush=True)
-    print(f" - building distance index", flush=True)
+    if print_header:
+        print(f"{set_name}", flush=True)
+    print(" - building distance index", flush=True)
     ref_tree = build_ref_index(
-        ref_ids = np.arange(len(n_names), dtype=int).tolist(),
-        ref_seqs = n_seqs.tolist(), 
-        distance = "Levenshtein", 
-        verify = False
+        ref_ids=np.arange(len(n_names), dtype=int).tolist(),
+        ref_seqs=n_seqs.tolist(),
+        distance="Levenshtein",
+        verify=False,
     )
 
     # Query named vs. named
-    print(f" - querying named barcodes", flush=True)
-    res_named = query(
-        tree = ref_tree,
-        query_ids = list(n_names),
-        query_seqs = list(n_seqs),
-        mode="single",
-        scope="radius",
-        max_radius=int(dist),
-        returns="pairs",  # [df_q_idx[(df_r_idx, dist), ...]]
-        ) if not df_n.empty else []
+    print(" - querying named barcodes", flush=True)
+    res_named = (
+        query(
+            tree=ref_tree,
+            query_ids=list(n_names),
+            query_seqs=list(n_seqs),
+            mode="single",
+            scope="radius",
+            max_radius=int(dist),
+            returns="pairs",  # [df_q_idx[(df_r_idx, dist), ...]]
+        )
+        if not df_n.empty
+        else []
+    )
 
     # Pass to parent select (req p>c, suffix shows ldist ops)
     named_parents = _select_parents(
@@ -107,19 +116,23 @@ def flag_putative_parents(
         r_counts=n_counts,
         req_parent_higher=True,
         suffix_fn=_parent_suffix_sub,
-        )
- 
+    )
+
     # Query unique vs. named
-    print(f" - querying unique barcodes", flush=True)
-    res_unique = query(
-        tree = ref_tree,
-        query_ids = list(u_names),
-        query_seqs = list(u_seqs),
-        mode="single",
-        scope="radius",
-        max_radius=int(dist),
-        returns="pairs",  # [df_q_idx[(df_r_idx, dist), ...]]
-        ) if not df_u.empty else []
+    print(" - querying unique barcodes", flush=True)
+    res_unique = (
+        query(
+            tree=ref_tree,
+            query_ids=list(u_names),
+            query_seqs=list(u_seqs),
+            mode="single",
+            scope="radius",
+            max_radius=int(dist),
+            returns="pairs",  # [df_q_idx[(df_r_idx, dist), ...]]
+        )
+        if not df_u.empty
+        else []
+    )
 
     # Pass to parent select (!req p>c, suffix shows ldist ops)
     unique_parents = _select_parents(
@@ -132,7 +145,7 @@ def flag_putative_parents(
         r_counts=n_counts,
         req_parent_higher=False,
         suffix_fn=_parent_suffix_sub,
-        )
+    )
 
     # Build parent mapping dict
     all_parents = {}
@@ -140,10 +153,11 @@ def flag_putative_parents(
     all_parents.update(unique_parents)
 
     # Optional: check remaining uniques via sliding-window core bc search
-    if core_bc is not None: 
-
+    if core_bc is not None:
         # Pull idx vals for unresolved uniques and search
-        unresolved_idx = np.flatnonzero(np.array([len(hits) == 0 for hits in res_unique], dtype=bool))
+        unresolved_idx = np.flatnonzero(
+            np.array([len(hits) == 0 for hits in res_unique], dtype=bool)
+        )
         df_u2 = df_u.iloc[unresolved_idx].reset_index(drop=True)
 
         if len(unresolved_idx) > 0:
@@ -152,11 +166,11 @@ def flag_putative_parents(
                 ref_seqs=n_seqs,  # search against named barcodes
                 core_bc=core_bc,
                 bc_seq_col=bc_seq_col,
-                )
+            )
 
-            u2_seqs   = df_u2[bc_seq_col].astype(str).to_numpy()
+            u2_seqs = df_u2[bc_seq_col].astype(str).to_numpy()
             u2_counts = df_u2[bc_count_col].astype(int).to_numpy()
-            u2_names  = df_u2[bc_name_col].astype(object).to_numpy()
+            u2_names = df_u2[bc_name_col].astype(object).to_numpy()
 
             # Pass to parent selection (req p>c, tag as core fallback hit)
             unique_parents_core = _select_parents(
@@ -169,8 +183,8 @@ def flag_putative_parents(
                 r_counts=n_counts,
                 req_parent_higher=False,
                 suffix_fn=_parent_suffix_core,
-                )
-            
+            )
+
             if unique_parents_core:
                 all_parents.update(unique_parents_core)
 
@@ -185,7 +199,7 @@ def _core_bc_search(
     ref_seqs: np.ndarray,
     core_bc: tuple[int, int],
     bc_seq_col: str = "bc_seq",
-    ) -> list[list[tuple[int, int]]]: # [df_q_idx[(df_r_idx, dist), ...]]
+) -> list[list[tuple[int, int]]]:  # [df_q_idx[(df_r_idx, dist), ...]]
     """
     Sliding-window fallback search over the core barcode region.
     """
@@ -213,7 +227,9 @@ def _core_bc_search(
 
         # Per query, define window slice lists
         win_q_ids = [f"0:{start}" for start in range(0, len(seq) - core_len + 1)]
-        win_q_seqs = [seq[start : start + core_len] for start in range(0, len(seq) - core_len + 1)]
+        win_q_seqs = [
+            seq[start : start + core_len] for start in range(0, len(seq) - core_len + 1)
+        ]
 
         # Query that list
         win_hits = query(
@@ -252,7 +268,7 @@ def _select_parents(
     r_counts: np.ndarray,
     req_parent_higher: bool,
     suffix_fn: Optional[Callable[[str, str], str]] = None,
-    ) -> dict[str, str]:
+) -> dict[str, str]:
     """
     Resolve to one parent per query.
     """
@@ -263,7 +279,6 @@ def _select_parents(
     results: dict[str, str] = {}
 
     for q_name, q_seq, q_count, hits in zip(q_names, q_seqs, q_counts, q_hits):
-        
         # skip non-hits
         if not hits:
             continue
@@ -313,12 +328,12 @@ def _parent_suffix_full(parent_seq: str, child_seq: str) -> str:
     ops = Levenshtein.editops(parent_seq, child_seq)
     if not ops:
         return f"{len(parent_seq)}="
-    
+
     # init local vars
     parts: list[str] = []
     cur_op = None
     cur_n = 0
-    
+
     # Helper: Run-length encode operations, flush when the op changes.
     def emit(op: str) -> None:
         nonlocal cur_op, cur_n
@@ -334,10 +349,10 @@ def _parent_suffix_full(parent_seq: str, child_seq: str) -> str:
         "replace": ("X", 1, 1),
         "insert": ("I", 0, 1),
         "delete": ("D", 1, 0),
-        }
+    }
 
-    i = j = 0 # pointers into parent_seq / child_seq
-    
+    i = j = 0  # pointers into parent_seq / child_seq
+
     for op in ops:
         # Fill exact matches up to next edit boundary.
         # Invariant: (i, j) tracks next unprocessed positions.
@@ -350,13 +365,13 @@ def _parent_suffix_full(parent_seq: str, child_seq: str) -> str:
         emit(cigar_op)
         i += di
         j += dj
-    
+
     # Emit any trailing matches after the final edit.
     while i < len(parent_seq) and j < len(child_seq):
         emit("=")
         i += 1
         j += 1
-    
+
     # Flush final run
     if cur_op is not None:
         parts.append(f"{cur_n}{cur_op}")
@@ -378,19 +393,22 @@ def _parent_suffix_sub(parent_seq: str, child_seq: str) -> str:
     subs = []
     for op in ops:
         if op.tag == "replace":
-            pos = op.src_pos + 1             # 1-based parent position
-            alt = child_seq[op.dest_pos]     # child's base at that position
+            pos = op.src_pos + 1  # 1-based parent position
+            alt = child_seq[op.dest_pos]  # child's base at that position
             subs.append(f"{pos}{alt}")
     return "-".join(subs) if subs else ""
 
-#%% Versions
+
+# %% Versions
 """
-v3.1
-- Updatated console reporting
-v3.0
-- dropped matrix backend, refactored bk process
-- added core_bc search
-- changed param-passing to settings dict for flag_putative_parents() 
-v2.2
-- Removed higher-parent req for uniques
+v3.1.0 20260623
+ - Fixed redundant parse mode logging by adding optional print_header arg flag_putative_parents()
+
+v3.0.0  20260320
+ - dropped matrix backend, refactored bk process
+ - added core_bc search
+ - changed param-passing to settings dict for flag_putative_parents()
+
+v2.2.0
+ - Removed higher-parent req for uniques
 """

@@ -2,9 +2,8 @@
 """
 Name:       compile.py
 Author:     CAG
-Version:    2.0
-Date:       2026/05/21
-Refactored: 2026/05/26
+Version:    2.1.0
+Date:       20260623
 
 Compile-mode ingest:
 - parsed workbook and base CSV input normalization
@@ -13,10 +12,11 @@ Compile-mode ingest:
 - `RunSeries` construction
 """
 
-#%% Imports
+# %% Imports
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -28,12 +28,14 @@ from bcparse.containers.runseries import RunSeries
 if TYPE_CHECKING:
     from bcparse.ingest.xlsx import ParsedAnalysis
 
-#%% Compile functions
+# %% Compile functions
+
 
 def read_base_csv(base_csv_path: str) -> pd.DataFrame:
     return pd.read_csv(base_csv_path).drop(
         columns=["ldist_group_lvl", "ldist_all"], errors="ignore"
     )
+
 
 def build_runseries(
     *,
@@ -54,6 +56,10 @@ def build_runseries(
         )
         if not csv_df.empty:
             csv_df["__compile_source"] = "csv"
+            csv_df["__compile_source_note"] = _compile_source_note(
+                "base_csv",
+                settings.get("base_csv_path"),
+            )
             csv_df["__compile_source_rank"] = 0
             csv_df["__compile_source_order"] = -1
             csv_df["__compile_source_mtime"] = float("-inf")
@@ -71,6 +77,10 @@ def build_runseries(
             )
 
         df["__compile_source"] = "analysis"
+        df["__compile_source_note"] = _compile_source_note(
+            "analysis",
+            parsed.filepath,
+        )
         df["__compile_source_rank"] = 1
         df["__compile_source_order"] = run_order
         df["__compile_source_mtime"] = parsed.filepath.stat().st_mtime
@@ -78,27 +88,28 @@ def build_runseries(
         compile_frames.append(df)
         runinfo_by_run_id[run_ids[0]] = parsed.runinfo
 
+    # Fail loudly if there's no data. Duh.
     if not compile_frames:
-        combined_df = pd.DataFrame()
-    else:
-        print("- deduplicating parsed analyses and existing data...")
-        combined_df = _dedup(pd.concat(compile_frames, ignore_index=True))
-
-        print("- assembling final combined dataframe...")
-        sort_cols = ["samp_group", "samp_name", "samp_date"]
-        combined_df = (
-            combined_df[sort_cols + [c for c in combined_df.columns if c not in sort_cols]]
-            .sort_values(sort_cols, ascending=True, kind="stable")
-            .reset_index(drop=True)
+        raise ValueError(
+            "No compile input data found. Provide at least one parsed Analysis workbook "
+            "or a non-empty base CSV."
         )
 
-        print("- running core QC...")
-        combined_df = _core_qc(combined_df)
+    print("- deduplicating parsed analyses and existing data...")
+    combined_df = _dedup(pd.concat(compile_frames, ignore_index=True))
 
-    n_source_runs = (
-        combined_df["run_id"].dropna().astype(str).nunique()
-        if not combined_df.empty else 0
+    print("- assembling final combined dataframe...")
+    sort_cols = ["samp_group", "samp_name", "samp_date"]
+    combined_df = (
+        combined_df[sort_cols + [c for c in combined_df.columns if c not in sort_cols]]
+        .sort_values(sort_cols, ascending=True, kind="stable")
+        .reset_index(drop=True)
     )
+
+    print("- running core QC...")
+    combined_df = _core_qc(combined_df)
+
+    n_source_runs = combined_df["run_id"].dropna().astype(str).nunique()
 
     run_series = RunSeries.from_long_df(
         combined_df,
@@ -108,16 +119,18 @@ def build_runseries(
 
     base_csv_path = settings.get("base_csv_path")
     for run_id, seq_run in run_series.runs.items():
-        seq_run.ensure_runinfo(filepath=base_csv_path)
-        run_series.runinfo_by_run_id[run_id] = seq_run.runinfo
+        runinfo = seq_run.ensure_runinfo(filepath=base_csv_path)
+        run_series.runinfo_by_run_id[run_id] = runinfo
 
-    run_series.series_meta.update({
-        "out_prefix": settings.get("out_prefix"),
-        "n_source_runs": n_source_runs,
-    })
-    run_series.data_df = combined_df.copy()
+    run_series.series_meta.update(
+        {
+            "out_prefix": settings.get("out_prefix"),
+            "n_source_runs": n_source_runs,
+        }
+    )
 
     return run_series
+
 
 def _dedup(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -139,16 +152,39 @@ def _dedup(df: pd.DataFrame) -> pd.DataFrame:
     if (~keep).any():
         print("- dropping duplicate inputs...")
         for sid, group in df.loc[~keep].groupby("sample_id", sort=False):
-            source = df.loc[keep & df["sample_id"].eq(sid), "__compile_source"].iloc[0]
-            print(f"  keeping: {sid} | source={source}")
-            for source in group["__compile_source"].drop_duplicates():
-                print(f"  dropped: {sid} | source={source}")
+            keep_rows = df.loc[
+                keep & df["sample_id"].eq(sid),
+                ["__compile_source", "__compile_source_note"],
+            ].drop_duplicates()
+            drop_rows = group[
+                ["__compile_source", "__compile_source_note"]
+            ].drop_duplicates()
+
+            for _, row in keep_rows.iterrows():
+                print(
+                    f"  keeping: {sid} | source={row['__compile_source']} "
+                    f"| {row['__compile_source_note']}"
+                )
+            for _, row in drop_rows.iterrows():
+                print(
+                    f"  dropped: {sid} | source={row['__compile_source']} "
+                    f"| {row['__compile_source_note']}"
+                )
 
     deduped = df.merge(win, on=["sample_id", *rank], how="inner")
 
     meta_cols = [
-        "sample_id", "idx_name", "run_id", "run_number", "run_name",
-        "run_date", "samp_group", "samp_name", "samp_date", "input", "filename",
+        "sample_id",
+        "idx_name",
+        "run_id",
+        "run_number",
+        "run_name",
+        "run_date",
+        "samp_group",
+        "samp_name",
+        "samp_date",
+        "input",
+        "filename",
     ]
     blocks = deduped[[c for c in meta_cols if c in deduped.columns]].drop_duplicates()
     dups = blocks.loc[blocks["sample_id"].duplicated(keep=False)]
@@ -163,13 +199,22 @@ def _dedup(df: pd.DataFrame) -> pd.DataFrame:
         errors="ignore",
     )
 
+
+def _compile_source_note(source: str, path) -> str:
+    if path is None or str(path).strip() == "":
+        return source
+    return f"{source}: {Path(path).name}"
+
+
 def _core_qc(df: pd.DataFrame) -> pd.DataFrame:
     """Core QC steps applied to the combined compile dataframe."""
     df = df.copy()
 
     # Re-establish numeric columns after CSV/XLSX round-trips.
     df[["bc_count", "proportion", "input"]] = (
-        df[["bc_count", "proportion", "input"]].apply(pd.to_numeric, errors="coerce").fillna(0)
+        df[["bc_count", "proportion", "input"]]
+        .apply(pd.to_numeric, errors="coerce")
+        .fillna(0)
     )
 
     df = qc.rank_uniques(df=df)
@@ -183,27 +228,30 @@ def _core_qc(df: pd.DataFrame) -> pd.DataFrame:
         .replace("NA-NA", None)
     )
 
-    df["multi_idx"] = (
-        df.groupby(["run_number", "samp_group", "bc_name"])["samp_name"]
-        .transform(lambda s: s.nunique() > 1)
-    )
+    df["multi_idx"] = df.groupby(["run_number", "samp_group", "bc_name"])[
+        "samp_name"
+    ].transform(lambda s: s.nunique() > 1)
 
     # Annotate x_idx across the whole series to catch/refresh missing or wrong in old analyses.
     df = qc.annotate_x_idx(df)
 
     return df
 
-#%% Versions
-"""
-v1.0 
-- Initial version, accomodating new model/container structure
-- Supercedes deprecated xlsx_compiler module and associated code in bcParse.py
 
-v2.0
-- Plain class replacing dataclass
-- copy() and collapse_samples_in_place() removed; emit_qc works directly from sample_list
-- Compile path collapsed from ~15 staticmethods to build_from_parsed_files + _dedup + _core_qc
-- sample_id is the compile deduplication contract
-2026-05-26 - Refactored into bcparse package structure
-2026-05-26 - Ensured compiled runs receive RunInfo and updated compile readout
+# %% Versions
+"""
+v2.1.0 20260623
+ - Bring forward compilation source in df for output runinfo
+
+v2.0.0 20260526
+ - Plain class replacing dataclass
+ - copy() and collapse_samples_in_place() removed; emit_qc works directly from sample_list
+ - Compile path collapsed from ~15 staticmethods to build_from_parsed_files + _dedup + _core_qc
+ - sample_id is the compile deduplication contract
+ - Refactored into bcparse package structure
+ - Ensured compiled runs receive RunInfo and updated compile readout
+
+v1.0.0
+ - Initial version, accomodating new model/container structure
+ - Supercedes deprecated xlsx_compiler module and associated code in bcParse.py
 """

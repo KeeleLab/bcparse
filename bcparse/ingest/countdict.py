@@ -12,7 +12,7 @@ Parse-mode count-dict ingest:
 - parse-mode builder state used by workbook emission
 """
 
-#%% Imports
+# %% Imports
 
 from __future__ import annotations
 
@@ -34,7 +34,8 @@ CountDict: TypeAlias = dict[str, dict[str, int]]
 RefDict: TypeAlias = dict[str, str]
 SettingsDict: TypeAlias = dict[str, Any]
 
-#%% Reference data
+# %% Reference data
+
 
 def load_parse_reference_data(
     *,
@@ -63,11 +64,13 @@ def load_parse_reference_data(
     p7_refdict = None if p7_path is None else _read_csv_to_dict(p7_path)
     return runinfo, p5_refdict, bc_refdict, p7_refdict
 
+
 def _read_csv_to_dict(file_path: str) -> dict[str, str]:
     with open(file_path, "r") as f:
         reader = csv.reader(f)
         next(reader)
         return {col1: col2 for col1, col2 in reader}
+
 
 def _read_fasta_to_dict(file_path: str) -> dict[str, str]:
     sequences, current_header, current_seq = {}, None, []
@@ -84,6 +87,7 @@ def _read_fasta_to_dict(file_path: str) -> dict[str, str]:
         sequences[current_header] = "".join(current_seq)
     return sequences
 
+
 def _merge_reference_dicts(
     *,
     primary: RefDict,
@@ -92,8 +96,11 @@ def _merge_reference_dicts(
 ) -> RefDict:
     overlap = sorted(set(primary).intersection(extra))
     if overlap:
-        raise ValueError(f"{extra_label!r} contains duplicate barcode name(s): {overlap}")
+        raise ValueError(
+            f"{extra_label!r} contains duplicate barcode name(s): {overlap}"
+        )
     return {**primary, **extra}
+
 
 def build_seqrun_from_countdict(
     *,
@@ -116,7 +123,9 @@ def build_seqrun_from_countdict(
         raise RuntimeError("CountDictBuilder did not produce a SeqRun.")
     return builder.seq_run
 
-#%% CountDictBuilder builder class
+
+# %% CountDictBuilder builder class
+
 
 class CountDictBuilder:
     """
@@ -198,7 +207,9 @@ class CountDictBuilder:
         Generate an index reference dictionary for p5-only runs, e/g {'VPX.P5.N':'ACGTACGT'}
         """
         self.idx_expect_kseq = {
-            v: k for k, v in p5_refdict.items() if k in runinfo.raw_df["Barcodes"].values
+            v: k
+            for k, v in p5_refdict.items()
+            if k in runinfo.raw_df["Barcodes"].values
         }
 
     def dual_index_ref(
@@ -353,7 +364,9 @@ class CountDictBuilder:
 
         # Merge runinfo to named_df and raise error if any rows are missed
         try:
-            merged_df = pd.merge(self.df, self.sample_meta_df, on="idx_name", how="left")
+            merged_df = pd.merge(
+                self.df, self.sample_meta_df, on="idx_name", how="left"
+            )
 
             # Check if any rows in self.named_df didn't find a match
             if merged_df["samp_group"].isnull().any():
@@ -390,7 +403,6 @@ class CountDictBuilder:
 
         # Per-index processing
         for idx, df in df_dict.items():
-
             sample_id = df["sample_id"].dropna().iloc[0]
             print(f"{idx} ({sample_id}):", flush=True)
 
@@ -410,6 +422,7 @@ class CountDictBuilder:
                 set_name=idx,
                 df=df,
                 settings=settings,
+                print_header=False,
             )
 
             # Collapse ambiguous single-N children into eligible parent rows.
@@ -434,7 +447,9 @@ class CountDictBuilder:
             "run_date": self.rdat,
             "filename": Path(settings["sample_path"]).name,
         }
-        self.df = pd.concat([pd.DataFrame(add_cols, index=self.df.index), self.df], axis=1)
+        self.df = pd.concat(
+            [pd.DataFrame(add_cols, index=self.df.index), self.df], axis=1
+        )
 
         # For shared barcodes, store each sample's share of that barcode's run total.
         self.df = qc.annotate_x_idx(self.df)
@@ -489,8 +504,7 @@ class CountDictBuilder:
                 sample_meta = {"idx_name": str(idx_name)}
             else:
                 sample_meta = {
-                    str(key): value
-                    for key, value in matches.iloc[0].to_dict().items()
+                    str(key): value for key, value in matches.iloc[0].to_dict().items()
                 }
             sample_id = str(sample_df["sample_id"].iloc[0])
             sample_meta["sample_id"] = sample_id
@@ -520,10 +534,7 @@ class CountDictBuilder:
         }
 
     def total_barcodes_by_idx(self) -> dict[str, int]:
-        return {
-            index: len(barcodes)
-            for index, barcodes in self.idx_known.items()
-        }
+        return {index: len(barcodes) for index, barcodes in self.idx_known.items()}
 
     def named_barcodes_by_idx(self) -> dict[str, int]:
         if self.df.empty:
@@ -555,10 +566,13 @@ class CountDictBuilder:
         }
 
 
-#%% Versions
+# %% Versions
 """
-v1.0 
-- Initial version, accomodating new model/container structure
-- Supercedes deprecated parse_countdata module and associated code in bcParse.py
-2026-05-26 - Refactored into bcparse package structure
+v1.0.1 20260623
+ - Fixed redundant parse mode logging by adding optional print_header arg flag_putative_parents()
+
+v1.0.0 20260526
+ - Initial version, accomodating new model/container structure
+ - Supercedes deprecated parse_countdata module and associated code in bcParse.py
+ - Refactored into bcparse package structure
 """

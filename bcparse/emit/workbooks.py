@@ -2,17 +2,16 @@
 """
 Name:       workbooks.py
 Author:     CAG
-Version:    2.0
-Date:       2026/05/21
-Refactored: 2026/05/26
+Version:    2.1.0
+Date:       20260623
 """
 
-#%% Imports
+# %% Imports
 
 from __future__ import annotations
 
-from datetime import datetime
 import os
+from datetime import datetime
 
 import pandas as pd
 
@@ -20,7 +19,8 @@ import bcparse.qc as qc
 from bcparse.containers.runseries import RunSeries
 from bcparse.containers.seqrun import SeqRun
 
-#%% Parse workbook
+# %% Parse workbook
+
 
 def write_parse_workbook(
     builder,
@@ -45,7 +45,9 @@ def write_parse_workbook(
 
     # Initialize runinfo output table.
     if runinfo_df is None:
-        runinfo_df = pd.DataFrame() if runinfo_obj is None else runinfo_obj.copy_raw_df()
+        runinfo_df = (
+            pd.DataFrame() if runinfo_obj is None else runinfo_obj.copy_raw_df()
+        )
     runinfo_df = runinfo_df.copy()
     runinfo_df["Date"] = runinfo_df["Date"].apply(qc.normalize_date)
 
@@ -56,7 +58,9 @@ def write_parse_workbook(
     concat_df[["run_date", "samp_date"]] = concat_df[["run_date", "samp_date"]].apply(
         lambda col: col.apply(qc.normalize_date)
     )
-    concat_df.to_csv(os.path.join(out_path, f"{seq_run.run_name}_concat.csv"), index=False)
+    concat_df.to_csv(
+        os.path.join(out_path, f"{seq_run.run_name}_concat.csv"), index=False
+    )
 
     # Build matrix and sample-table workbook views.
     group_mats_dict = samp_group_matrices(
@@ -90,15 +94,17 @@ def write_parse_workbook(
 
     if missing:
         print(
-            f""" 
+            f"""
             No barcodes found for {missing}!
             """
         )
 
-    if not set(group_mats_dict.keys()) == set(groups) or not set(group_tabs_dict.keys()) == set(groups):
+    if not set(group_mats_dict.keys()) == set(groups) or not set(
+        group_tabs_dict.keys()
+    ) == set(groups):
         raise ValueError(
             f"""
-                Check concat output for missing data. 
+                Check concat output for missing data.
                 Details:
                 - group_mats_dict keys: {set(group_mats_dict.keys())}
                 - group_tabs_dict keys: {set(group_tabs_dict.keys())}
@@ -112,7 +118,9 @@ def write_parse_workbook(
     # Add analysis-specific summary columns to runinfo.
     runinfo_df = _modify_runinfo(builder, runinfo_df, seq_run)
 
-    with pd.ExcelWriter(os.path.join(out_path, f"{seq_run.run_name}_Analysis.xlsx")) as writer:
+    with pd.ExcelWriter(
+        os.path.join(out_path, f"{seq_run.run_name}_Analysis.xlsx")
+    ) as writer:
         runinfo_df.to_excel(writer, sheet_name="runinfo", index=False)
 
         for samp_group in groups:
@@ -133,7 +141,9 @@ def write_parse_workbook(
 
         settings["analysis date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         settings_df = pd.DataFrame(list(settings.items()))
-        settings_df.to_excel(writer, sheet_name="Analysis settings", index=False, header=False)
+        settings_df.to_excel(
+            writer, sheet_name="Analysis settings", index=False, header=False
+        )
 
 
 def _modify_runinfo(
@@ -146,21 +156,17 @@ def _modify_runinfo(
     """
     modified_runinfo = runinfo_df.copy()
     runinfo_obj = seq_run.runinfo
-    index_key = modified_runinfo["full_idx"] if runinfo_obj is None else runinfo_obj.index_key_for_output(modified_runinfo)
+    index_key = (
+        modified_runinfo["full_idx"]
+        if runinfo_obj is None
+        else runinfo_obj.index_key_for_output(modified_runinfo)
+    )
     idx_notes = builder.notes_by_idx()
 
-    modified_runinfo["n_reads"] = index_key.map(
-        builder.total_reads_by_idx()
-    )
-    modified_runinfo["n_bc"] = index_key.map(
-        builder.total_barcodes_by_idx()
-    )
-    modified_runinfo["n_bc_named"] = index_key.map(
-        builder.named_barcodes_by_idx()
-    )
-    modified_runinfo["n_reads_ac"] = index_key.map(
-        builder.above_cutoff_reads_by_idx()
-    )
+    modified_runinfo["n_reads"] = index_key.map(builder.total_reads_by_idx())
+    modified_runinfo["n_bc"] = index_key.map(builder.total_barcodes_by_idx())
+    modified_runinfo["n_bc_named"] = index_key.map(builder.named_barcodes_by_idx())
+    modified_runinfo["n_reads_ac"] = index_key.map(builder.above_cutoff_reads_by_idx())
     modified_runinfo["count-to-input_ratio"] = (
         modified_runinfo["n_reads"] / modified_runinfo["Input TOTAL PER BARCODE"]
     )
@@ -171,7 +177,8 @@ def _modify_runinfo(
     return modified_runinfo
 
 
-#%% Compile workbook
+# %% Compile workbook
+
 
 def write_compile_workbook(run_series: RunSeries, settings: dict) -> None:
     from bcparse.emit.views import (
@@ -187,8 +194,8 @@ def write_compile_workbook(run_series: RunSeries, settings: dict) -> None:
     os.makedirs(out_path, exist_ok=True)
 
     compile_df, df_ac, contam_check = emit_qc(run_series, settings=settings)
-    compile_df_out = compile_df.copy()
-    df_ac_out = df_ac.copy()
+    compile_df_out = _drop_compile_private_cols(compile_df)
+    df_ac_out = _drop_compile_private_cols(df_ac)
 
     date_cols = ["run_date", "samp_date"]
     compile_df_out[date_cols] = compile_df_out[date_cols].apply(
@@ -230,7 +237,10 @@ def write_compile_workbook(run_series: RunSeries, settings: dict) -> None:
                 index=True,
             )
 
-def emit_qc(run_series: RunSeries, *, settings: dict) -> tuple[pd.DataFrame, pd.DataFrame, bool]:
+
+def emit_qc(
+    run_series: RunSeries, *, settings: dict
+) -> tuple[pd.DataFrame, pd.DataFrame, bool]:
     """Build QC-annotated compile outputs without mutating self."""
     if settings.get("collapse_to_parent", True):
         print("- collapsing children to parent within each sample...")
@@ -259,9 +269,16 @@ def emit_qc(run_series: RunSeries, *, settings: dict) -> tuple[pd.DataFrame, pd.
     print("- building above-cutoff dataframe...")
     return compile_df, _build_above_cutoff_df(compile_df), contam_check
 
+
+def _drop_compile_private_cols(df: pd.DataFrame) -> pd.DataFrame:
+    private_cols = [col for col in df.columns if str(col).startswith("__compile_")]
+    return df.drop(columns=private_cols, errors="ignore").copy()
+
+
 # ====================
 # QC HELPERS
 # ====================
+
 
 def _apply_optional_qc(df: pd.DataFrame, settings: dict) -> tuple[pd.DataFrame, bool]:
     if any(
@@ -300,6 +317,7 @@ def _apply_optional_qc(df: pd.DataFrame, settings: dict) -> tuple[pd.DataFrame, 
 
     return df, contam_check
 
+
 def _apply_ldist_qc(
     df: pd.DataFrame,
     settings: dict,
@@ -331,6 +349,7 @@ def _apply_ldist_qc(
         set_name="Full Series", df=df, settings=settings, aggr=aggr
     ).rename(columns={"putative_parent": output_col})
 
+
 def _build_above_cutoff_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty or "above_cutoff" not in df.columns:
         return df.iloc[0:0].copy()
@@ -339,14 +358,20 @@ def _build_above_cutoff_df(df: pd.DataFrame) -> pd.DataFrame:
         return df_ac
 
     df_ac["bc_count"] = pd.to_numeric(df_ac["bc_count"], errors="coerce").fillna(0)
-    df_ac["__denom"] = df_ac.groupby("sample_id", dropna=False)["bc_count"].transform("sum")
+    df_ac["__denom"] = df_ac.groupby("sample_id", dropna=False)["bc_count"].transform(
+        "sum"
+    )
     df_ac["proportion"] = (df_ac["bc_count"] / df_ac["__denom"]).fillna(0)
 
     return df_ac.drop(columns=["__denom"])
 
 
-#%% Versions
+# %% Versions
 """
-2026-05-26 - Refactored into bcparse package structure
-2026-05-26 - Updated compile optional-QC console reporting
+v2.1.0 20260623
+ - accomodating source/sample_id meta for views.py update
+
+v2.0.0 20260526
+ - Refactored into bcparse package structure
+ - Updated compile optional-QC console reporting
 """
