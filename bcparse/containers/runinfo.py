@@ -104,8 +104,8 @@ class RunInfo:
         """
         Parse a raw runinfo Excel table into a RunInfo object.
         Called from:
-            - ingest/countdict.py
-            - ingest/xlsx.py, for Analysis.xlsx first sheets
+            - ingest/parse_mode.py
+            - ingest/compile_mode.py, for Analysis.xlsx first sheets
         """
 
         # --- Preprocess, strip whitespace ---
@@ -495,20 +495,20 @@ RunInfo is the run-level metadata container used throughout parse and
 compile flows.
 
 Construction:
- - Parse mode reads runinfo.xlsx in ingest/countdict.py via RunInfo.from_table().
+ - Parse mode reads runinfo.xlsx in ingest/parse_mode.py via RunInfo.from_table().
  - Compile mode reconstructs RunInfo from Analysis.xlsx first sheets in
-   ingest/xlsx.py via RunInfo.from_table().
+   ingest/compile_mode.py via RunInfo.from_table().
  - SeqRun.ensure_runinfo() synthesizes RunInfo from long-format data via
    RunInfo.from_long_df() in compiled/base CSV inputs.
 
 Storage and flow:
- - ParsedAnalysis and CountDictBuilder both carry RunInfo during ingest.
+ - ParseMode and ParsedAnalysis both carry RunInfo during ingest.
  - SeqRun stores one optional RunInfo as seq_run.runinfo.
  - RunSeries stores per-run metadata in runinfo_by_run_id.
 
 Downstream consumers:
  - main checks find_idx_sample_id_collisions() before parsing FASTQ.
- - CountDictBuilder uses raw_df to validate expected P5 or P5/P7 indexes and
+ - ParseMode uses raw_df to validate expected P5 or P5/P7 indexes and
    sample_rows to merge normalized sample metadata into count data.
  - emit/workbooks.py uses copy_raw_df(), expected_groups, and
    index_key_for_output() when writing parse workbooks.

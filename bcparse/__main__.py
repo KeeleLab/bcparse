@@ -6,7 +6,6 @@
 import argparse
 import logging
 from argparse import RawTextHelpFormatter
-from pathlib import Path
 
 # Allow direct full-path execution from outside the repo:
 #   python /path/to/repo/bcparse/__main__.py --gui
@@ -16,10 +15,10 @@ if __package__ in (None, ""):
 
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from bcparse.config import get_settings, stocks
+from bcparse.config import stocks
 from bcparse.settings import CompileSettings, ParseSettings
 
-ver = "4.2.0 - 2026.05.27"
+ver = "4.3.0 - 2026.06.25"
 
 description = f"""
 Name:       bcparse
@@ -111,117 +110,127 @@ parser = argparse.ArgumentParser(
     prog="python -m bcparse",
     description=description,
     formatter_class=RawTextHelpFormatter,
-)
+    )
 
 # --- PARSE MODE ARGS ---
-parser.add_argument("--sample_path", type=str, help="path/to/sample.fq")
+parser.add_argument(
+    "--sample_path", type=str, help="path/to/sample.fq"
+    )
 
-parser.add_argument("--runinfo_path", type=str, help="path/to/runinfo.xlsx")
+parser.add_argument(
+    "--runinfo_path", type=str, help="path/to/runinfo.xlsx"
+    )
 
-parser.add_argument("--stock", choices=stocks, help="Declare stock-specific run mode")
+parser.add_argument(
+    "--stock", choices=stocks, help="Declare stock-specific run mode"
+    )
 
-parser.add_argument("--dualindex", action="store_true", help="Run in dual-index mode")
+parser.add_argument(
+    "--dualindex", action="store_true", help="Run in dual-index mode"
+    )
 
 parser.add_argument(
     "--mean_qual",
     type=int,
     default=30,
     help="Minimum allowed mean phred per read/seq extract",
-)
+    )
 
 parser.add_argument(
     "--mismatches",
     type=int,
     default=1,
     help="Number of allowed target mismatches for fastq parsing",
-)
+    )
 
-parser.add_argument("--mask", action="store_true", help="Mask low quality bases")
+parser.add_argument(
+    "--mask", action="store_true", help="Mask low quality bases"
+    )
 
 parser.add_argument(
     "--mask_qual", type=int, default=20, help="Mask low quality bases (default: 20)"
-)
+    )
 
 parser.add_argument(
     "--collapse_ambig", action="store_true", help="Collapse single-N ambiguous reads"
-)
+    )
 
 parser.add_argument(
     "--legacy_format", action="store_true", help="Return output in legacy format"
-)
+    )
 
 parser.add_argument(
     "--filt_mat_ac", action="store_true", help="Filter matrix for above-cutoff only"
-)
+    )
 
 parser.add_argument(
     "--collapse_to_parent",
     action=argparse.BooleanOptionalAction,
     default=True,
     help="Collapse grouped parse outputs to putative parent barcodes (default: True)",
-)
+    )
 
 parser.add_argument(
     "--append_spike_ref",
     action="store_true",
     help="Append Spike_reference.fa entries to the selected barcode reference in parse mode",
-)
+    )
 
 parser.add_argument("--gui", action="store_true", help="Use GUI for file selection")
 
 # --- COMPILE MODE ARGS ---
 parser.add_argument(
     "--compile", action="store_true", help="Run compile protocol instead of parsing"
-)
+    )
 
 parser.add_argument(
     "--xlsx_path", type=str, help="path/to/dir with Analysis.xlsx files"
-)
+    )
 
 parser.add_argument(
     "--base_csv_path",
     type=str,
     default=None,
     help="Optional: provide a path to a previously-compiled *all.csv to coalesce against new compiled analyses",
-)
+    )
 
-parser.add_argument("--out_prefix", type=str, help="Output prefix for compile mode")
+parser.add_argument(
+    "--out_prefix", type=str, help="Output prefix for compile mode"
+    )
 
 parser.add_argument(
     "--ldist_samp_lvl", action="store_true", help="Rerun ldist checks at sample-level"
-)
+    )
 
 parser.add_argument(
     "--ldist_group_lvl", action="store_true", help="Run ldist checks on compiled groups"
-)
+    )
 
 parser.add_argument(
     "--contam_check",
     action="store_true",
     help="Run contamination check & return extra sheet",
-)
+    )
 
 # --- COMMON ARGS ---
-parser.add_argument("--out_path", type=str, help="path/to/output_location")
+parser.add_argument(
+    "--out_path", type=str, help="path/to/output_location"
+    )
 
 parser.add_argument(
     "--dist_threshold", type=int, default=1, help="Distance cutoff for parent checks"
-)
+    )
 
+# %% Parse Mode
 
-# %% Modes
-
-
-# --- PARSE MODE ---
 def run_parse_mode(args):
 
     # Mode-specific imports
     from bcparse.emit.workbooks import write_parse_workbook
-    from bcparse.ingest.countdict import CountDictBuilder, load_parse_reference_data
-    from bcparse.ingest.fastq import stream_to_countdict
+    from bcparse.ingest.parse_mode import ParseMode
 
     """
-    1. Initialize arguments and run settings. See bcparse/config.py, bcparse/ingest/fastq.py, bcparse/gui/
+    1. Initialize arguments and run settings. See bcparse/config.py, bcparse/ingest/parse_mode.py, bcparse/gui/
 
     - Required args are sample_path, runinfo_path, out_path, and stock.
     - See bcparse/config.py for stock options, e.g. "239M"
@@ -263,9 +272,6 @@ def run_parse_mode(args):
         print(str(e))
         return
 
-    params = parse_settings.to_dict()
-
-    # Show off...
     print(
         f"""
 
@@ -278,108 +284,32 @@ def run_parse_mode(args):
     """
     )
 
-    # Get stock-defined run settings - add new stocks and settings in bcparse/config.py!
-    settings = get_settings(
-        params["stock"],
-        params["dualindex"],
-        append_spike_ref=params["append_spike_ref"],
-    )
+    """
+    2. Main analysis: build one SeqRun from parse settings.
+    """
+    parse_run = ParseMode(settings=parse_settings)
+    seq_run = parse_run.seq_run
 
-    # Add CLI/GUI args to settings dict:
-    settings.update(params)
-
-    settings.update(
-        {
-            "software_version": ver,
-        }
-    )
-
-    # Write to terminal
+    # Write settings to terminal once ParseMode has expanded stock/runtime values.
+    settings = parse_run.runtime_settings
+    settings["software_version"] = ver
     print("\n".join(f"{key}: {value}" for key, value in settings.items()) + "\n")
 
     """
-    2. Format reference data and validate runinfo before counting
+    3. Main output.
     """
-    runinfo, p5_refdict, bc_refdict, p7_refdict = load_parse_reference_data(
-        runinfo_path=settings["runinfo_path"],
-        primer_path=settings["primer_path"],
-        barcode_path=settings["barcode_path"],
-        spike_path=settings.get("spike_path")
-        if settings.get("append_spike_ref", False)
-        else None,
-        p7_path=settings["p7_path"] if settings["dualindex"] else None,
-    )
-
-    """
-    3. Stream fastq to count barcode reads per index
-
-    - Return {idx:{bc:count}}
-    - See bcparse/ingest/fastq.py
-    - mask returns N for base q<mask_qual
-    - reads drop when mean phred<mean_qual
-    - mismatches = # allowed errors
-    """
-
-    # Check for duplicate sample names before counting
-    collisions = runinfo.find_idx_sample_id_collisions()
-    if collisions:
-        lines = [
-            "Error: duplicate sample identities found in runinfo.",
-            "Distinct idx_name values resolve to the same sample_id:",
-            "",
-        ]
-        for sample_id, idx_names in collisions.items():
-            lines.append(f"- {sample_id}")
-            lines.append(f"  idx_name(s): {', '.join(idx_names)}")
-
-        raise SystemExit("\n".join(lines))
-    else:
-        print("\n")
-
-        res_pfq = stream_to_countdict(
-            settings=settings,
-        )
-
-        print("\n")
-
-    """
-    4. Main analysis: build one SeqRun from {idx_seq:{bc_seq:count}}
-    """
-
-    # Build parse-mode helper, then take the core SeqRun from it.
-    parse_run = CountDictBuilder(
-        countdict=res_pfq,
-        runinfo=runinfo,
-        bc_refdict=bc_refdict,
-        p5_refdict=p5_refdict,
-        p7_refdict=p7_refdict,
-        settings=settings,
-    ).build()
-
-    seq_run = parse_run.seq_run
-
-    print("\n")
-
-    """
-    5. Main output.
-    """
-    write_parse_workbook(builder=parse_run, settings=settings, runinfo_df=None)
+    write_parse_workbook(parse_run=parse_run, settings=settings, runinfo_df=None)
 
     # In case of -i run, to examine:
-    return res_pfq, seq_run, settings
+    return parse_run, seq_run, settings
 
+# %% Compile Mode
 
-# --- COMPILE MODE ---
 def run_compile_mode(args):
 
     # Mode-specific imports:
     from bcparse.emit.workbooks import write_compile_workbook
-    from bcparse.ingest.compile import build_runseries, read_base_csv
-    from bcparse.ingest.xlsx import (
-        AnalysisWorkbookParser,
-        WorkbookParseError,
-        XlsxPathManager,
-    )
+    from bcparse.ingest.compile_mode import CompileMode
 
     # Define expected parameters
     # If running with --gui...
@@ -411,15 +341,6 @@ def run_compile_mode(args):
         print(str(e))
         return
 
-    params = compile_settings.to_dict()
-
-    # Collect settings dict
-    settings = params
-    settings["core_bc"] = (
-        None  # For now, until I figure out how to detect stocks and do core search...
-    )
-
-    # Show off...
     print(
         f"""
 
@@ -432,52 +353,21 @@ def run_compile_mode(args):
     """
     )
 
-    # Set up paths to Analysis files
-    xpm = XlsxPathManager(wdir=settings["xlsx_path"])
-    print(f"Discovered {len(xpm.files)} Analysis workbook(s).")
-
-    # Optional base csv in
-    base_df = (
-        read_base_csv(settings["base_csv_path"]) if settings["base_csv_path"] else None
-    )
-    if base_df is not None:
-        print(
-            f"Loaded base csv: {Path(settings['base_csv_path']).name} with {len(base_df)} row(s)."
-        )
-
-    print()
-
-    # Iterate paths and obtain list of parsed xlsx data
-    res_px = []
-
-    for i, f in enumerate(xpm.files, start=1):
-        print(f"Parsing workbook {i}/{len(xpm.files)}: {f.name}")
-        try:
-            px = AnalysisWorkbookParser(filepath=f)
-            if not px.data_df.empty:
-                res_px.append(px.analysis)
-        # Exit on any parsing error, with informative message about which file caused the issue.
-        except WorkbookParseError as e:
-            raise SystemExit(f"Compile aborted while parsing workbook:\n{e}") from e
-
-    print()
-
-    # Compile set of parsed data to final output
-    print("Building compiled series...")
-    run_series = build_runseries(
-        parsed_files=res_px,
-        base_df=base_df,
-        settings=settings,
-    )
+    # Main analysis: build one RunSeries from compile settings.
+    compile_run = CompileMode(settings=compile_settings)
+    run_series = compile_run.run_series
+    settings = compile_run.runtime_settings
 
     print()
     print("Optional QC and output writing...")
     write_compile_workbook(run_series=run_series, settings=settings)
     print("Compile complete.")
 
+    # In case of -i run, to examine:
+    return compile_run, run_series, settings
 
-# %% Main process function
 
+# %% Main
 
 def main():
     """
@@ -518,15 +408,13 @@ if __name__ == "__main__":
 
     # Expose objects for -i interactive sessions
     if _ret is not None:
-        # Unpack exactly in the order returned by run_parse_mode()
-        res_pfq, seq_run, settings = _ret
+        # Unpack exactly in the order returned by run_parse_mode() or run_compile_mode().
+        mode_run, container, settings = _ret
 
         # Optional: print a short confirmation
         print(
             "\nRun with -i (interactive)? Python env will retain:"
-            "\n  res_pfq   → raw FASTQ parse results (dict)"
-            "\n  seq_run   → parse-mode SeqRun"
-            "\n  settings  → run settings dictionary\n"
+            "\n  mode_run   → parse/compile mode object"
+            "\n  container  → parse SeqRun or compile RunSeries"
+            "\n  settings   → runtime settings dictionary\n"
         )
-
-# %%

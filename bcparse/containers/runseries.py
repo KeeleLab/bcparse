@@ -47,48 +47,6 @@ class RunSeries:
         self.source = source
 
     # ====================
-    # INGEST
-    # ====================
-
-    @classmethod
-    def from_long_df(
-        cls,
-        df: pd.DataFrame,
-        *,
-        runinfo_by_run_id: dict[str, RunInfo],
-        source: str = "unknown",
-    ) -> "RunSeries":
-        """
-        Materialize a RunSeries from a normalized long-format dataframe.
-        Splits by run identity and builds one SeqRun per run.
-        """
-        ri = runinfo_by_run_id
-        # Base CSVs can pass an empty runinfo map; compile.py fills it later
-        # with ensure_runinfo().
-
-        if df.empty:  # safeguard if called directly for some reason
-            raise ValueError("RunSeries.from_long_df requires a non-empty dataframe.")
-
-        # Split by run_id and build SeqRun objects
-        runs = {
-            str(run_id): SeqRun.from_long_df(
-                run_df,
-                source=source,
-                runinfo=ri.get(str(run_id)),
-            )
-            for run_id, run_df in df.groupby("run_id", sort=False)
-        }
-
-        # Return a RunSeries object with the runs, series metadata, and the original dataframe
-        return cls(
-            runs=runs,
-            series_meta={"groupby_col": "run_id"},
-            data_df=df,
-            runinfo_by_run_id=ri,
-            source=source,
-        )
-
-    # ====================
     # EMIT
     # ====================
 
@@ -109,18 +67,19 @@ class RunSeries:
         return self.data_df.copy()
 
 
-# %% Repository usage notes
+# %% Usage notes
 """
 RunSeries is the compile-mode top-level container. It represents a
-deduplicated series of sequencing runs after compile.py has normalized,
+deduplicated series of sequencing runs after compile_mode.py has normalized,
 merged, and QC-annotated long-format input data.
 
 Construction:
- - ingest/compile.py is the only current external construction path.
- - build_runseries() creates a final combined long dataframe, then calls
-   RunSeries.from_long_df().
- - from_long_df() splits the dataframe by run_id and builds one SeqRun per run.
- - Empty dataframes are invalid here; compile.py should fail before calling
+ - ingest/compile_mode.py is the current external construction path.
+ - CompileMode creates a final combined long dataframe, then calls its
+   _build_runseries() method.
+ - Compile-mode construction splits the dataframe by run_id and builds one
+   SeqRun per run before instantiating RunSeries.
+ - Empty dataframes are invalid here; compile_mode.py should fail before calling
    this constructor if no usable input data exists.
 
 Stored state:
@@ -142,6 +101,7 @@ Downstream consumers:
 """
 v2.1.0 20260623
  - Dropped over-flexible input types in lieu of trusting upstream contract
+ - Moved compile dataframe materialization into ingest/compile_mode.py
  - Formatting and comments
 
 v2.0.0 20260526

@@ -76,7 +76,18 @@ Notes
 """
 
 import random
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    cast,
+)
 
 from rapidfuzz import distance as rfdist
 

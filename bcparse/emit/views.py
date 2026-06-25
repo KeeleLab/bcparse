@@ -22,7 +22,6 @@ from bcparse.containers.seqrun import SeqRun
 
 # %%
 
-
 def _legacy_bool_string(value) -> str:
     if pd.isna(value):
         return ""

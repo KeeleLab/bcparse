@@ -12,7 +12,7 @@ These are used across the parse- and compile-side build pipelines.
 # %% Imports
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Any, Callable, Optional, TypeAlias, cast
 
 import numpy as np
 import pandas as pd
@@ -20,11 +20,13 @@ from rapidfuzz.distance import Levenshtein
 
 from bcparse.lib.bk_tree import build_ref_index, query
 
+ParentHits: TypeAlias = list[list[tuple[int, int]]]
+
 # %% Parent ID
 
 
 def flag_putative_parents(
-    settings: dict,
+    settings: dict[str, Any],
     set_name: str,
     df: "pd.DataFrame",
     bc_name_col: str = "bc_name",
@@ -43,8 +45,8 @@ def flag_putative_parents(
     """
 
     # Pull vars from settings
-    dist = settings.get("dist_threshold")
-    core_bc = settings.get("core_bc")
+    dist = int(settings["dist_threshold"])
+    core_bc = cast(tuple[int, int] | None, settings.get("core_bc"))
 
     # Define working df
     df_c = df.copy()
@@ -91,15 +93,18 @@ def flag_putative_parents(
 
     # Query named vs. named
     print(" - querying named barcodes", flush=True)
-    res_named = (
-        query(
-            tree=ref_tree,
-            query_ids=list(n_names),
-            query_seqs=list(n_seqs),
-            mode="single",
-            scope="radius",
-            max_radius=int(dist),
-            returns="pairs",  # [df_q_idx[(df_r_idx, dist), ...]]
+    res_named: ParentHits = (
+        cast(
+            ParentHits,
+            query(
+                tree=ref_tree,
+                query_ids=list(n_names),
+                query_seqs=list(n_seqs),
+                mode="single",
+                scope="radius",
+                max_radius=dist,
+                returns="pairs",  # [df_q_idx[(df_r_idx, dist), ...]]
+            ),
         )
         if not df_n.empty
         else []
@@ -120,15 +125,18 @@ def flag_putative_parents(
 
     # Query unique vs. named
     print(" - querying unique barcodes", flush=True)
-    res_unique = (
-        query(
-            tree=ref_tree,
-            query_ids=list(u_names),
-            query_seqs=list(u_seqs),
-            mode="single",
-            scope="radius",
-            max_radius=int(dist),
-            returns="pairs",  # [df_q_idx[(df_r_idx, dist), ...]]
+    res_unique: ParentHits = (
+        cast(
+            ParentHits,
+            query(
+                tree=ref_tree,
+                query_ids=list(u_names),
+                query_seqs=list(u_seqs),
+                mode="single",
+                scope="radius",
+                max_radius=dist,
+                returns="pairs",  # [df_q_idx[(df_r_idx, dist), ...]]
+            ),
         )
         if not df_u.empty
         else []
@@ -199,7 +207,7 @@ def _core_bc_search(
     ref_seqs: np.ndarray,
     core_bc: tuple[int, int],
     bc_seq_col: str = "bc_seq",
-) -> list[list[tuple[int, int]]]:  # [df_q_idx[(df_r_idx, dist), ...]]
+) -> ParentHits:  # [df_q_idx[(df_r_idx, dist), ...]]
     """
     Sliding-window fallback search over the core barcode region.
     """
@@ -217,7 +225,7 @@ def _core_bc_search(
     )
 
     # Init res list
-    q_res: list[list[tuple[int, int]]] = []
+    q_res: ParentHits = []
 
     # sliding-window search
     for seq in unresolved_df[bc_seq_col].astype(str).to_numpy():
@@ -232,14 +240,17 @@ def _core_bc_search(
         ]
 
         # Query that list
-        win_hits = query(
-            tree=core_tree,
-            query_ids=win_q_ids,
-            query_seqs=win_q_seqs,
-            mode="single",
-            scope="radius",
-            max_radius=1,  # Allow one edit in sliding-window core searches
-            returns="pairs",
+        win_hits = cast(
+            ParentHits,
+            query(
+                tree=core_tree,
+                query_ids=win_q_ids,
+                query_seqs=win_q_seqs,
+                mode="single",
+                scope="radius",
+                max_radius=1,  # Allow one edit in sliding-window core searches
+                returns="pairs",
+            ),
         )
 
         # Collape to single list per query
@@ -262,7 +273,7 @@ def _select_parents(
     q_names: np.ndarray,
     q_seqs: np.ndarray,
     q_counts: np.ndarray,
-    q_hits: list[list[tuple[int, int]]],
+    q_hits: ParentHits,
     r_names: np.ndarray,
     r_seqs: np.ndarray,
     r_counts: np.ndarray,
@@ -403,6 +414,7 @@ def _parent_suffix_sub(parent_seq: str, child_seq: str) -> str:
 """
 v3.1.0 20260623
  - Fixed redundant parse mode logging by adding optional print_header arg flag_putative_parents()
+ - cast() use because bk_trees has many possible return types.
 
 v3.0.0  20260320
  - dropped matrix backend, refactored bk process

@@ -67,16 +67,15 @@ dataframe belongs to one `sample_id`.
 
 ### SeqRun
 
-Preferred future direction:
+Current direction:
 
-- `SeqRun.from_long_df()` becomes the canonical construction path for both parse
-  and compile.
-- Parse mode should build its final normalized long dataframe, then call
-  `SeqRun.from_long_df(df, runinfo=runinfo, source="parse")`.
-- Compile mode already reaches `SeqRun.from_long_df()` through
-  `RunSeries.from_long_df()`.
-- Remove unused flexibility such as accepting arbitrary iterables of `SeqSamp`.
-- Remove empty/default object paths unless there is a real pipeline case.
+- `SeqRun` is a strict container.
+- Parse mode builds `SeqSamp` objects and the final normalized dataframe, then
+  constructs `SeqRun` directly at the end of `ParseMode`.
+- Compile mode materializes `SeqRun` objects inside `CompileMode` after the
+  final deduplicated dataframe exists.
+- Avoid broad input coercion and empty/default object paths unless there is a
+  real pipeline case.
 
 ### RunSeries
 
@@ -84,7 +83,8 @@ Preferred future direction:
 
 - It is compile-mode only.
 - It is built from a non-empty final compiled long dataframe.
-- `RunSeries.from_long_df()` splits by `run_id` and builds one `SeqRun` per run.
+- `CompileMode` splits by `run_id`, builds one `SeqRun` per run, then
+  constructs `RunSeries`.
 - Empty data should fail upstream in compile ingest.
 
 ## Mode Pipeline Sketch
@@ -94,7 +94,7 @@ Preferred future direction:
 Desired linear story:
 
 ```text
-FASTQ/countdict + RunInfo.from_table()
+FASTQ + RunInfo.from_table()
   -> load reference data
   -> stream FASTQ into countdict
   -> assign observed indexes to expected indexes
@@ -102,7 +102,8 @@ FASTQ/countdict + RunInfo.from_table()
   -> merge runinfo sample metadata
   -> run per-sample QC
   -> normalize final long dataframe
-  -> SeqRun.from_long_df(df, runinfo=runinfo, source="parse")
+  -> build SeqSamp objects
+  -> SeqRun(...)
   -> emit parse outputs
 ```
 
@@ -118,15 +119,16 @@ Analysis workbooks and optional base CSV
   -> attach compile source provenance
   -> deduplicate by sample_id
   -> run core compile QC
-  -> RunSeries.from_long_df(df, runinfo_by_run_id=...)
+  -> build SeqRun objects
+  -> RunSeries(...)
   -> ensure missing runinfo for base-CSV-derived runs
   -> emit compile outputs
 ```
 
 ## Current Provenance Context
 
-Compile ingest now owns source provenance via an internal
-`__compile_source_note` column.
+CompileMode now owns source provenance via an internal `__compile_source_note`
+column.
 
 `emit/views.py` should use that source note to populate a `source` column in the
 compiled runinfo output. Do not append source text to `notes`.
@@ -142,17 +144,8 @@ Prefer small, verifiable steps:
 1. Make contracts stricter in place.
 2. Align parse and compile on canonical long-dataframe construction.
 3. Move orchestration into `parse_mode.py` and `compile_mode.py`.
-4. Keep old function names temporarily as bridges.
-5. Update imports after behavior is verified.
-6. Remove shims and obsolete modules only after the new mode files are stable.
-
-Useful temporary bridges:
-
-```python
-build_runseries(...)
-load_parse_reference_data(...)
-build_seqrun_from_countdict(...)
-```
+4. Update imports after behavior is verified.
+5. Remove shims and obsolete modules only after the new mode files are stable.
 
 ## Verification
 
@@ -160,7 +153,7 @@ For focused changes, run basedpyright on touched modules and nearby consumers,
 for example:
 
 ```bash
-uv run basedpyright bcparse/containers/seqrun.py bcparse/ingest/countdict.py
+uv run basedpyright bcparse/containers/seqrun.py bcparse/ingest/parse_mode.py
 ```
 
 For behavior changes, prefer small smoke checks using the sample data in

@@ -23,7 +23,7 @@ from bcparse.containers.seqrun import SeqRun
 
 
 def write_parse_workbook(
-    builder,
+    parse_run,
     *,
     settings: dict,
     runinfo_df: pd.DataFrame | None = None,
@@ -37,8 +37,8 @@ def write_parse_workbook(
     legacy_format = settings["legacy_format"]
     filt_mat_ac = settings["filt_mat_ac"]
     collapse_to_parent = settings["collapse_to_parent"]
-    seq_run = builder.seq_run
-    runinfo_obj = builder.runinfo
+    seq_run = parse_run.seq_run
+    runinfo_obj = parse_run.runinfo
 
     if seq_run is None:
         raise ValueError("Parse output requested before SeqRun was built.")
@@ -113,10 +113,10 @@ def write_parse_workbook(
                 Previously seen issues here:
                 - ran 239M/M2 instead of 239M/M2_dual-index.
             """
-        )
+    )
 
     # Add analysis-specific summary columns to runinfo.
-    runinfo_df = _modify_runinfo(builder, runinfo_df, seq_run)
+    runinfo_df = _modify_runinfo(parse_run, runinfo_df, seq_run)
 
     with pd.ExcelWriter(
         os.path.join(out_path, f"{seq_run.run_name}_Analysis.xlsx")
@@ -147,7 +147,7 @@ def write_parse_workbook(
 
 
 def _modify_runinfo(
-    builder,
+    parse_run,
     runinfo_df: pd.DataFrame,
     seq_run: SeqRun,
 ) -> pd.DataFrame:
@@ -161,12 +161,14 @@ def _modify_runinfo(
         if runinfo_obj is None
         else runinfo_obj.index_key_for_output(modified_runinfo)
     )
-    idx_notes = builder.notes_by_idx()
+    idx_notes = parse_run.notes_by_idx()
 
-    modified_runinfo["n_reads"] = index_key.map(builder.total_reads_by_idx())
-    modified_runinfo["n_bc"] = index_key.map(builder.total_barcodes_by_idx())
-    modified_runinfo["n_bc_named"] = index_key.map(builder.named_barcodes_by_idx())
-    modified_runinfo["n_reads_ac"] = index_key.map(builder.above_cutoff_reads_by_idx())
+    modified_runinfo["n_reads"] = index_key.map(parse_run.total_reads_by_idx())
+    modified_runinfo["n_bc"] = index_key.map(parse_run.total_barcodes_by_idx())
+    modified_runinfo["n_bc_named"] = index_key.map(parse_run.named_barcodes_by_idx())
+    modified_runinfo["n_reads_ac"] = index_key.map(
+        parse_run.above_cutoff_reads_by_idx()
+    )
     modified_runinfo["count-to-input_ratio"] = (
         modified_runinfo["n_reads"] / modified_runinfo["Input TOTAL PER BARCODE"]
     )

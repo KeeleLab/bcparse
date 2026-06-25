@@ -3,130 +3,76 @@
 """
 Name:       seqrun.py
 Author:     CAG
-Version:    1.0
+Version:    1.1.0
 Date:       2026/03/26
 Refactored: 2026/05/26
 
 `SeqRun` is the main in-memory representation for one sequencing run:
 - many `SeqSamp` members
 - normalized run-level metadata
-- round-trip construction from canonical long-format data
+- optional RunInfo provenance
 """
 
-#%% Imports
+# %% Imports
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Mapping
 
 import pandas as pd
 
-from bcparse.qc import identity as qc
 from bcparse.containers.runinfo import RunInfo
 from bcparse.containers.seqsamp import SeqSamp
 
-#%% SeqRun model
+# %% SeqRun model
+
 
 class SeqRun:
     """
-    Container for one sequencing run made up of arbitrary samples.
+    Strict container for one sequencing run made up of SeqSamp objects.
+
+    Construction is owned by parse/compile mode code. SeqRun only validates and
+    stores the already-materialized samples, run metadata, optional RunInfo, and
+    canonical long dataframe.
     """
 
     def __init__(
         self,
-        samples=None,
+        samples: dict[str, SeqSamp],
         *,
-        run_number=None,
-        run_name=None,
-        run_date=None,
-        run_id=None,
-        runinfo=None,
-        filepath=None,
+        run_number,
+        run_name,
+        run_date,
+        run_id,
+        runinfo: RunInfo | None,
+        filepath,
         source="unknown",
-        data_df=None,
+        data_df: pd.DataFrame,
     ):
-        self.samples    = self._coerce_samples(samples or {})
+        self._validate_samples(samples)
+        if data_df.empty:
+            raise ValueError("SeqRun requires a non-empty data_df.")
+
+        self.samples = dict(samples)
         self.run_number = run_number
-        self.run_name   = run_name
-        self.run_date   = run_date
-        self.run_id     = run_id or qc.make_run_id(run_number, filepath, filepath)
-        self.runinfo    = runinfo
-        self.filepath   = Path(filepath) if filepath else None
-        self.source     = source
-        self.data_df    = None if data_df is None else data_df.copy()
-
-    # ====================
-    # INGEST
-    # ====================
-
-    @classmethod
-    def from_long_df(
-        cls,
-        df: pd.DataFrame,
-        *,
-        source: str = "unknown",
-        runinfo: RunInfo | None = None,
-    ) -> "SeqRun":
-        """
-        Materialize a SeqRun from a normalized long-format dataframe representing one run.
-        """
-        if df.empty:
-            return cls(source=source)
-
-        run_ids = df["run_id"].dropna().astype(str).unique().tolist()
-        if len(run_ids) > 1:
-            raise ValueError(f"SeqRun.from_long_df expected one run_id, found {run_ids}")
-
-        def first_val(col):
-            return None if col not in df.columns or df[col].dropna().empty else df[col].dropna().iloc[0]
-
-        samples = {}
-        for sample_id, sample_df in df.groupby("sample_id", dropna=False, sort=False):
-            sample_meta = {
-                col: sample_df[col].dropna().iloc[0]
-                for col in [
-                    "sample_id", "idx_name", "samp_group", "samp_name", "samp_date",
-                    "input", "run_number", "run_name", "run_date", "filename",
-                ]
-                if col in sample_df.columns and not sample_df[col].dropna().empty
-            }
-            resolved_id = None if pd.isna(sample_id) else str(sample_id)
-            resolved_id = resolved_id or sample_meta.get("sample_id") or str(len(samples))
-            samples[resolved_id] = SeqSamp.from_table(
-                sample_df=sample_df,
-                sample_meta=sample_meta,
-                sample_id=resolved_id,
-                source=source,
-            )
-
-        return cls(
-            samples=samples,
-            run_number=first_val("run_number"),
-            run_name=first_val("run_name"),
-            run_date=first_val("run_date"),
-            run_id=first_val("run_id"),
-            runinfo=runinfo,
-            filepath=first_val("filename"),
-            source=source,
-        )
+        self.run_name = run_name
+        self.run_date = run_date
+        self.run_id = run_id
+        self.runinfo = runinfo
+        self.filepath = Path(filepath) if filepath else None
+        self.source = source
+        self.data_df = data_df.copy()
 
     @staticmethod
-    def _coerce_samples(
-        samples: Mapping[str, SeqSamp] | Iterable[SeqSamp],
-    ) -> dict[str, SeqSamp]:
-        items = samples.items() if isinstance(samples, Mapping) else ((None, s) for s in samples)
-        sample_map: dict[str, SeqSamp] = {}
-        for key, sample in items:
-            resolved_id = str(key or sample.sample_id or sample.sample_meta.get("sample_id"))
-            if resolved_id is None:
-                raise ValueError("SeqRun samples require a resolvable sample_id.")
-            if resolved_id in sample_map:
-                raise ValueError(f"Duplicate sample_id in SeqRun: {resolved_id}")
+    def _validate_samples(samples: dict[str, SeqSamp]) -> None:
+        if not samples:
+            raise ValueError("SeqRun requires at least one SeqSamp.")
+        for sample_id, sample in samples.items():
+            resolved_id = str(sample_id)
             if sample.sample_id != resolved_id:
-                raise ValueError(f"SeqRun key/sample_id mismatch: key={resolved_id}, object={sample.sample_id}")
-            sample_map[resolved_id] = sample
-        return sample_map
+                raise ValueError(
+                    f"SeqRun key/sample_id mismatch: key={resolved_id}, object={sample.sample_id}"
+                )
 
     def ensure_runinfo(self, filepath: str | Path | None = None) -> RunInfo:
         if self.runinfo is not None:
@@ -152,20 +98,11 @@ class SeqRun:
 
     @property
     def sample_meta_df(self) -> pd.DataFrame:
-        return pd.DataFrame([s.sample_meta for s in self.sample_list]) if self.samples else pd.DataFrame()
+        return pd.DataFrame([s.sample_meta for s in self.sample_list])
 
     @property
     def df(self) -> pd.DataFrame:
-        if self.data_df is not None:
-            return self.data_df.copy()
-        if not self.samples:
-            return pd.DataFrame()
-        df = pd.concat([s.df for s in self.sample_list], ignore_index=True)
-        for col, val in {"run_id": self.run_id, "run_number": self.run_number,
-                         "run_name": self.run_name, "run_date": self.run_date}.items():
-            if col not in df.columns or df[col].isna().all():
-                df[col] = val
-        return df
+        return self.data_df.copy()
 
     @property
     def df_above_cutoff(self) -> pd.DataFrame:
@@ -180,13 +117,51 @@ class SeqRun:
         if "samp_group" not in df.columns:
             return []
         return df["samp_group"].dropna().astype(str).unique().tolist()
-        
 
-#%% Versions
+
+# %% Usage notes
 """
-v1.0 
+SeqRun is the per-run container used by both parse and compile modes. It
+represents one sequencing run after ingest has already produced SeqSamp
+children and a run-scoped normalized long-format dataframe.
+
+Construction:
+ - ingest/parse_mode.py builds one SeqRun directly at the end of ParseMode.
+ - ingest/compile_mode.py builds one SeqRun per run_id while materializing the
+   final RunSeries.
+ - SeqRun does not own dataframe-to-run construction helpers; mode classes
+   decide how samples are grouped and how run metadata is recovered.
+
+Stored state:
+ - samples is the canonical {sample_id: SeqSamp} mapping.
+ - data_df is the cached run-scoped long dataframe used by the df property.
+ - run_number, run_name, run_date, and run_id identify the sequencing run.
+ - runinfo stores workbook-derived or synthesized RunInfo metadata.
+ - filepath and source record ingest provenance.
+
+Contracts:
+ - one SeqRun maps to exactly one run_id.
+ - samples must be non-empty and keyed by each SeqSamp.sample_id.
+ - data_df must be non-empty.
+ - runinfo may be None during compile-mode construction for base-CSV-derived
+   runs, then filled by ensure_runinfo().
+
+Downstream consumers:
+ - RunSeries stores SeqRun objects in its runs mapping.
+ - emit/workbooks.py uses df, sample_list, groups, and runinfo for parse and
+   compile workbook output.
+ - emit/views.py uses sample_list and df for grouped output matrices and
+   concatenated runinfo views.
+"""
+
+
+# %% Versions
+"""
+v1.1.0 20260625
+- Removed from_long_df() and flexible sample coercion.
+- ParseMode and CompileMode now own mode-specific SeqRun materialization.
+
+v1.0.0 20260526
 - Initial version, accomodating new model/container structure
 - Supercedes deprecated parse_countdata module and associated code in bcParse.py
-2026-05-26 - Refactored into bcparse package structure
-2026-05-26 - Added ensure_runinfo for synthetic compile runinfo
 """
