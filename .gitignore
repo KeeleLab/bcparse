@@ -37,4 +37,4 @@ env/
 # Local workspace
 _sampledata/
 _troubleshooting/
-
+*.agents.md
