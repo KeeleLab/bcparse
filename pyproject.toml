@@ -1,6 +1,8 @@
 [project]
 name = "bcparse"
 version = "4.3.0"
+description = "Barcode parsing and compilation for short-read sequencing data."
+readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "numpy>=2.4.6",
@@ -21,15 +23,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["bcparse*"]
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.package-data]
 bcparse = [
     "ref/*",
-    "_misc_/*",
-    "_misc_/_for_R/*",
-    "_misc_/_harnesses/*",
-    "_misc_/_mermaid/*",
-    "_misc_/_templates/*",
-    "_misc_/_templates/multi_sample_run/*",
 ]
 
 [tool.ruff]

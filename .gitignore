@@ -30,11 +30,15 @@ env/
 .idea/
 *.code-workspace
 
-# Bundled separately, distributed alongside the package
+# Internal dev workspace, distributed separately as needed
 **/_misc_/
-**/ref/
+
+# Agent-local notes
+agents.md
+AGENTS.md
+*.agents.md
+.agents/
 
 # Local workspace
 _sampledata/
 _troubleshooting/
-*.agents.md
