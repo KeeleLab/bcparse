@@ -50,6 +50,17 @@ pip install .
 # To update, reinstall with --force (uv, pipx) or --upgrade (pip).
 ```
 
+Install directly from GitHub:
+
+```bash
+uv tool install git+https://github.com/chazgoo/bcparse.git
+pipx install git+https://github.com/chazgoo/bcparse.git
+pip install git+https://github.com/chazgoo/bcparse.git
+
+# For a specific tag, branch, or commit:
+uv tool install git+https://github.com/chazgoo/bcparse.git@v4.3.0
+```
+
 Once installed, `bcparse` can be run from any directory:
 
 ```bash
