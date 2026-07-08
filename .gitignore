@@ -41,5 +41,4 @@ AGENTS.md
 .agents/
 
 # Local workspace
-_sampledata/
-_troubleshooting/
+_dev/
