@@ -77,10 +77,9 @@ X/INT:
         --fastqout_notmerged_rev /dev/null
     ```
 
-SL8_1-8:
+SL8:
 
     This is currently rarely used - built to rerun CTL_escapes.
-    SL8 1-8 are disctinct from SL89-40, and I don't know why.
 
     Requires manual joining of R1/R2 via:
     ```
@@ -97,6 +96,10 @@ SL8_1-8:
     Read structure & treatment comparable to M/VPX, but with different p5/p7 ref targets & primer sets.
 
     < 4bp tag :: (`tlen_p5`)bp idx :: `ref_p5`+ :: revcomp `ref_bc` :: revcomp (`tlen_bc`)bp barcode :: revcomp `ref_p7` :: revcomp (`tlen_p7`)bp p7 >
+
+    Two modes rely on distinct `ref_bc`/`tlen_bc` combinations:
+        1. _bc (barcode)
+        2. _epi (TAT_SL8 epitope, so far)
 
     Primers added to P5/P7_primers.csv, require prefix "SL8" in runinfo, Eg. SL8.P5_1/SL8.P7_1.
 
@@ -134,7 +137,7 @@ base_opts = {
         "dualindex": False,
         "core_bc": None,
     },
-    "SL8_1-8": {
+    "SL8_bc": {
         "rdir": "rev",
         "ref_p5": "AGCTGAGAGAGGATTTCCTCCC",
         "tdir_p5": "upstream",
@@ -147,6 +150,20 @@ base_opts = {
         "dualindex": False,
         "core_bc": None,
     },
+    "SL8_epi": {
+        "rdir": "rev",
+        "ref_p5": "AGCTGAGAGAGGATTTCCTCCC",
+        "tdir_p5": "upstream",
+        "tlen_p5": 8,
+        "ref_bc": "CGCTCTTCATGCATTTCAGAGGCGGATGCA",
+        "tdir_bc": "downstream",
+        "tlen_bc": 24,
+        "primer_path": ref_path("P5_primers.csv"),
+        "append_spike_ref": False,
+        "dualindex": False,
+        "core_bc": None,
+    },
+
 }
 
 # dual index settings
@@ -239,9 +256,13 @@ settings_opts = {
         "base_profile": "M",
         "barcode_path": ref_path("SHIV_1054M_reference.fasta"),
     },
-    "SL8_1-8_239M": {
-        "base_profile": "SL8_1-8",
+    "SL8_239M": {
+        "base_profile": "SL8_bc",
         "barcode_path": ref_path("239M_reference.fasta"),
+    },
+    "TAT_SL8": {
+        "base_profile": "SL8_epi",
+        "barcode_path": ref_path("Epitope_reference.fasta"),
     },
 }
 

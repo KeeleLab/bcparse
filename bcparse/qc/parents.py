@@ -401,14 +401,21 @@ def _parent_suffix_sub(parent_seq: str, child_seq: str) -> str:
     Return compact substitution suffix for parent->child, e.g. "5C_12A".
     """
     ops = Levenshtein.editops(parent_seq, child_seq)
+
+    if any(op.tag in {"insert", "delete"} for op in ops):
+        return "indel"
+
     subs = []
     for op in ops:
         if op.tag == "replace":
             pos = op.src_pos + 1  # 1-based parent position
-            alt = child_seq[op.dest_pos]  # child's base at that position
+            alt = child_seq[op.dest_pos] # child's base at that position
             subs.append(f"{pos}{alt}")
-    return "-".join(subs) if subs else ""
 
+    if subs:
+        return "-".join(subs)
+
+    return "other"
 
 # %% Versions
 """

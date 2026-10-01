@@ -18,7 +18,7 @@ if __package__ in (None, ""):
 from bcparse.config import stocks
 from bcparse.settings import CompileSettings, ParseSettings
 
-ver = "4.3.0 - 2026.06.25"
+ver = "4.3.1 - 2026.08.26"
 
 description = f"""
 Name:       bcparse

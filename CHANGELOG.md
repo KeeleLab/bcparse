@@ -1,5 +1,9 @@
 # CHANGELOG
 
+### [4.3.1] - New configs
+1. Added TAT_SL8 epitope config, previous SL8 configuration reorganized in config.py
+2. Modified parent-distance reporting to include `indel` in addition to substitutions
+
 ### [4.3.0] - tweaks
 1. Containers;
   - comments and formatting, behaviour change - strict contracts,
@@ -246,10 +250,100 @@ preserved in `bcParse_history_YYYYMMDD.tar.gz`.
     - n_reads / Input TOTAL PER BARCODE
     - This raises TypeError: unsupported operand type(s) for /: 'float' and 'str'. Fix should coerce/normalize the denominator before calculating the ratio, ideally reusing the existing comma-stripping input normalization logic.
 
-## Nice to have:
+## Report M/M2 VPX overlap
 
-- Write arg for xlsx path txtfile list
-- Streamline running multiple parse runs?
+- Keep dual-index `fill_seq` behavior: rebuild short observations into the expected 34 bp reference shape before barcode assignment.
+- At dataframe QC, replace boolean `short_bc` with the inferred VPX suffix/barcode prefix overlap and report the remaining non-VPX sequence.
+- Parse mode uses its known profile; compile mode infers a profile per sample from informative named barcodes and propagates it to Unique rows.
+- Run overlap annotation only for M/M2-derived profiles; use `NA` for non-M or unresolved samples.
+
+### Potential implementation
+
+Replace `flag_shorts()` with a dataframe-level annotation. Parse mode passes its
+known profile; compile mode supplies the inferred `barcode_profile` column.
+
+```python
+def flag_shorts(
+    df: pd.DataFrame,
+    *,
+    fill_seq: str,
+    base_profile: str | None = None,
+    profile_col: str = "barcode_profile",
+    min_overlap: int = 10,
+) -> pd.DataFrame:
+    df = df.copy()
+    profiles = (
+        pd.Series(base_profile, index=df.index, dtype="string")
+        if base_profile is not None
+        else df[profile_col].astype("string")
+    )
+    applies = profiles.isin({"M", "SL8_bc"})
+
+    overlap = pd.Series(pd.NA, index=df.index, dtype="Int64")
+    non_vpx = pd.Series(pd.NA, index=df.index, dtype="string")
+
+    for idx, seq in df.loc[applies, "bc_seq"].items():
+        seq = str(seq)
+        matches = range(min(len(fill_seq), len(seq)), 0, -1)
+        n_overlap = next(
+            (n for n in matches if fill_seq[-n:] == seq[:n]),
+            0,
+        )
+        n_overlap = n_overlap if n_overlap >= min_overlap else 0
+        overlap.at[idx] = n_overlap
+        non_vpx.at[idx] = seq[n_overlap:]
+
+    df["short_bc"] = overlap
+    df["non_vpx_seq"] = non_vpx
+    return df
+```
+
+Compile ingest can resolve named barcodes against configured reference FASTAs,
+then propagate the resulting barcode profile across each sample. Normalize
+`SL8_bc` to `M` because it uses the 239M barcode reference biology.
+
+```python
+BARCODE_PROFILE = {
+    "M": "M",
+    "SL8_bc": "M",
+    "X": "X",
+    "SL8_epi": "SL8_epi",
+}
+
+
+def infer_barcode_profiles(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    wanted = set(df.loc[~df["bc_name"].str.startswith("Unique", na=False), "bc_name"])
+    hits: dict[str, set[str]] = defaultdict(set)
+
+    for stock in settings_opts.values():
+        profile = BARCODE_PROFILE[stock["base_profile"]]
+        with open(stock["barcode_path"], "rt") as fasta:
+            for line in fasta:
+                if line.startswith(">"):
+                    name = line[1:].strip()
+                    if name in wanted:
+                        hits[name].add(profile)
+
+    name_profile = {
+        name: next(iter(profiles))
+        for name, profiles in hits.items()
+        if len(profiles) == 1
+    }
+
+    def sample_profile(names: pd.Series):
+        profiles = {name_profile[name] for name in names if name in name_profile}
+        return next(iter(profiles)) if len(profiles) == 1 else pd.NA
+
+    by_sample = df.groupby("sample_id")["bc_name"].agg(sample_profile)
+    df["barcode_profile"] = df["sample_id"].map(by_sample).astype("string")
+    return df
+```
+
+- Characterization mode for new stocks
+  - Or at least: ability to run without barcode reference - for same purpose
+- Coming quickly - ability to deal with degenerate primers (specifically HIVB...)
+- Streamline running multiple parse runs - write arg to run a tsv of runinfos/fastqs/settings.
 - Brandon wants a QC app... mode?
         - Develop this software into a more comprehensive analysis suite?
         - "live" mode, build a list of `bcsamp` objects, standardized figs, etc...
@@ -564,6 +658,121 @@ Then:
 4. Run from loaded settings.
 
 This keeps the first implementation small and useful even before the reload feature exists.
+
+## Support Degenerate P5/P7 Target References
+
+### Goal
+
+Allow `ref_p5` and `ref_p7` to contain multiple acceptable concrete sequences.
+
+The extracted index sequences remain concrete, so the existing index-reference and assignment logic does not need to change.
+
+### Proposed Config Contract
+
+Accept either a single sequence:
+
+```python
+"ref_p5": "CCAGAACCTCCACTACCCATTCATCC",
+```
+
+or multiple acceptable sequences:
+
+```python
+"ref_p5": (
+    "CCAGAACCTCCACTACCCATTCATCC",
+    "CCAGAACCTCCACTACCCGTTCATCC",
+),
+```
+
+The same contract should apply to `ref_p7` and, where appropriate, `ref_bc`.
+
+### Runtime Normalization
+
+Normalize all target references to a tuple:
+
+```python
+TargetRef = str | tuple[str, ...]
+
+
+def normalize_refs(value: TargetRef) -> tuple[str, ...]:
+    return (value,) if isinstance(value, str) else value
+```
+
+This preserves compatibility with existing stock configurations.
+
+### Pattern Compilation
+
+Escape each concrete reference, join the alternatives with `|`, and compile them using the existing mismatch allowance:
+
+```python
+refs = normalize_refs(settings["ref_p5"])
+alternatives = "|".join(regex.escape(ref) for ref in refs)
+
+pat_p5 = regex.compile(
+    rf"(?:{alternatives}){{s<={settings['mismatches']}}}"
+)
+```
+
+This pattern means:
+
+> Match any configured reference sequence while allowing at most
+> `mismatches` base substitutions.
+
+The existing `mismatches` setting already controls `{s<=...}` matching for `ref_p5`, `ref_p7`, and `ref_bc`, so no new mismatch parameter is required.
+
+### Validation
+
+For each target-reference collection:
+
+- require at least one sequence;
+- require nonempty sequences;
+- normalize sequences to uppercase;
+- allow only `A`, `C`, `G`, and `T`;
+- reject duplicate alternatives;
+- require all alternatives to have the same length.
+
+Equal-length alternatives ensure that adjacent index-extraction boundaries remain consistent.
+
+### Unchanged Behavior
+
+No changes should be required for:
+
+- extracting concrete P5/P7 index sequences;
+- loading `P5_primers.csv` or `P7_primers.csv`;
+- mapping `idx_seq` to `idx_name`;
+- merging runinfo metadata;
+- downstream barcode QC;
+- barcode parent-distance checks.
+
+### Distance Settings
+
+The current workflow uses two related distance mechanisms:
+
+```text
+mismatches
+├── ref_p5/ref_p7/ref_bc matching
+│   └── substitution distance: {s<=mismatches}
+└── observed index assignment
+    └── Levenshtein distance
+
+dist_threshold
+└── downstream barcode parent/QC comparisons
+```
+
+Supporting multiple target-reference sequences can continue using the existing `mismatches` behavior.
+
+### Focused Verification
+
+Add smoke checks covering:
+
+1. The original singular-string configuration still works.
+2. Each configured `ref_p5` alternative extracts the expected P5 index.
+3. Each configured `ref_p7` alternative extracts the expected P7 index.
+4. An alternative containing one sequencing mismatch is accepted when `mismatches=1`.
+5. The same mismatch is rejected when `mismatches=0`.
+6. Invalid, duplicate, empty, or unequal-length references fail validation.
+7. Extracted concrete index sequences still map to the expected sample.
+
 
 # Current Architecture Notes
 
