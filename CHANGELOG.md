@@ -1,5 +1,13 @@
 # CHANGELOG
 
+### [4.4.0] - Barcode discovery profiles
+1. Added `M_discover` and `X_discover` parse profiles that extract and quantify
+   barcodes without loading a stock barcode reference FASTA.
+    - Name unmatched exact sequences as deterministic, run-wide uppercase `BC.N`
+    - Apply the existing per-sample distance QC to all discovered barcodes
+    - Emit `<run_name>_Discovery.xlsx`
+    - Compile mode discovers both Analysis and Discovery workbooks
+
 ### [4.3.1] - New configs
 1. Added TAT_SL8 epitope config, previous SL8 configuration reorganized in config.py
 2. Modified parent-distance reporting to include `indel` in addition to substitutions

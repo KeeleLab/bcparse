@@ -118,9 +118,13 @@ def write_parse_workbook(
     # Add analysis-specific summary columns to runinfo.
     runinfo_df = _modify_runinfo(parse_run, runinfo_df, seq_run)
 
-    with pd.ExcelWriter(
-        os.path.join(out_path, f"{seq_run.run_name}_Analysis.xlsx")
-    ) as writer:
+    workbook_kind = "Discovery" if settings.get("discover", False) else "Analysis"
+    workbook_path = os.path.join(
+        out_path,
+        f"{seq_run.run_name}_{workbook_kind}.xlsx",
+    )
+
+    with pd.ExcelWriter(workbook_path) as writer:
         runinfo_df.to_excel(writer, sheet_name="runinfo", index=False)
 
         for samp_group in groups:

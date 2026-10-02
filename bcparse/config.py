@@ -264,6 +264,16 @@ settings_opts = {
         "base_profile": "SL8_epi",
         "barcode_path": ref_path("Epitope_reference.fasta"),
     },
+    "M_discover": {
+        "base_profile": "M",
+        "discover": True,
+        "barcode_path": None,
+    },
+    "X_discover": {
+        "base_profile": "X",
+        "discover": True,
+        "barcode_path": None,
+    },
 }
 
 # List of available stocks
@@ -300,7 +310,11 @@ def get_stock_settings(stock: str, dualindex: bool, append_spike_ref: bool = Fal
 
     else:
         print("Manual CLI mode — please enter all required parameters.")
+        discover = input("Run barcode discovery mode? [y/n]: ").lower().startswith(
+            "y"
+        )
         settings_dict = {
+            "discover": discover,
             "rdir": input("Enter read direction: "),
             "ref_p5": input("Enter p5 reference sequence: "),
             "tdir_p5": input("Enter p5 target direction: "),
@@ -309,7 +323,11 @@ def get_stock_settings(stock: str, dualindex: bool, append_spike_ref: bool = Fal
             "tdir_bc": input("Enter barcode target direction: "),
             "tlen_bc": int(input("Enter barcode target length: ")),
             "primer_path": input("Path/to/sequencing_primers.csv"),
-            "barcode_path": input("Path/to/barcode_reference.fasta"),
+            "barcode_path": (
+                None
+                if discover
+                else input("Path/to/barcode_reference.fasta")
+            ),
             "spike_path": input(
                 "Optional path/to/Spike_reference.fa (leave blank to skip): "
             ),
@@ -329,6 +347,21 @@ def get_stock_settings(stock: str, dualindex: bool, append_spike_ref: bool = Fal
 
         if not settings_dict["append_spike_ref"]:
             settings_dict["spike_path"] = None
+
+    settings_dict.setdefault("discover", False)
+
+    discover = settings_dict["discover"]
+    barcode_path = settings_dict.get("barcode_path")
+
+    if discover and barcode_path is not None:
+        raise ValueError(
+            f"Discovery profile {stock!r} must not define barcode_path."
+        )
+
+    if not discover and not barcode_path:
+        raise ValueError(
+            f"Reference-backed profile {stock!r} requires barcode_path."
+        )
 
     return settings_dict
 

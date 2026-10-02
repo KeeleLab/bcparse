@@ -34,7 +34,6 @@ from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any, Generator, Tuple, TypeAlias, cast
 
-import numpy as np
 import pandas as pd
 import regex
 from rapidfuzz.distance import Levenshtein
@@ -170,9 +169,11 @@ class ParseMode:
         )
 
         p5_refdict = self._read_csv_to_dict(str(self.runtime_settings["primer_path"]))
-        bc_refdict = self._read_fasta_to_dict(
-            str(self.runtime_settings["barcode_path"])
-        )
+        bc_refdict: RefDict = {}
+        if not self.runtime_settings["discover"]:
+            bc_refdict = self._read_fasta_to_dict(
+                str(self.runtime_settings["barcode_path"])
+            )
         spike_path = (
             self.runtime_settings.get("spike_path")
             if self.settings.append_spike_ref
@@ -380,9 +381,11 @@ class ParseMode:
 
     def _count_dict_to_dfs(self) -> None:
         """
-        Convert dict = {'idx':{'bc':count}} to 3-col df to obtain a per-run set of named barcodes.
-            - Uniques are named consistentily across all indexes in rank order.
-            - Generates nonredundant df self.bc_set and complete self.named_df with counts.
+        Convert {'idx': {'bc': count}} to a long barcode/count dataframe.
+
+        Reference-backed runs retain configured names and rank unmatched
+        sequences as Unique.N. Discovery runs rank unmatched sequences as BC.N.
+        Names are assigned consistently across every index in the run.
         """
         # Generate the raw df
         rawdf = pd.DataFrame.from_records(
@@ -394,24 +397,39 @@ class ParseMode:
             columns=["idx_name", "bc_seq", "bc_count"],
         )
 
-        # Dealing with uniques:
-        # Get df with total counts per barcode sequence
+        # Get run-level total counts per exact barcode sequence. Sequence is the
+        # deterministic tiebreak for equal counts.
         df = (
-            rawdf.groupby(["bc_seq"])["bc_count"]
-            .sum()
-            .reset_index()
-            .sort_values(by="bc_count", ascending=False)
+            rawdf.groupby("bc_seq", as_index=False)
+            .agg({"bc_count": "sum"})
+            .sort_values(
+                ["bc_count", "bc_seq"],
+                ascending=[False, True],
+            )
+            .reset_index(drop=True)
         )
 
-        # map barcodes names from refdict
-        df["bc_name"] = df["bc_seq"].map(self.bc_refdict_kseq)
+        # Preserve exact names from the loaded barcode references. A discovery
+        # run has no stock reference, but may have an appended control reference.
+        df["bc_name"] = (
+            df["bc_seq"].map(self.bc_refdict_kseq).astype("string")
+        )
 
-        # swap unmatched NaN for 'Unique' and add ranks
-        df["bc_name"] = df["bc_name"].replace(np.nan, "Unique")
-        df = qc.rank_uniques(df=df)
+        if self.runtime_settings["discover"]:
+            unmatched = df["bc_name"].isna()
+            unmatched_seqs = df.loc[unmatched, "bc_seq"]
+            discovered_names = {
+                seq: f"BC.{rank}"
+                for rank, seq in enumerate(unmatched_seqs, start=1)
+            }
+            df.loc[unmatched, "bc_name"] = df.loc[unmatched, "bc_seq"].map(
+                discovered_names
+            )
+        else:
+            df["bc_name"] = df["bc_name"].fillna("Unique")
+            df = qc.rank_uniques(df=df)
 
-        # Sort by count and select seq/name columns
-        df = df.sort_values(by="bc_count", ascending=False)
+        # Select the nonredundant run-level sequence/name mapping.
         df = df[["bc_seq", "bc_name"]]
 
         # Save a complete set of named barcode seqs for the run
@@ -613,13 +631,19 @@ class ParseMode:
         if self.df.empty:
             return {}
 
+        reference_names = set(self.bc_refdict)
+        if not reference_names:
+            return {str(index): 0 for index in self.idx_known}
 
         counts = (
-            self.df[~self.df["bc_name"].str.contains("Unique", na=False)]
+            self.df[self.df["bc_name"].isin(reference_names)]
             .groupby("idx_name")
             .size()
         )
-        return {str(index): int(count) for index, count in counts.items()}
+        return {
+            str(index): int(counts.get(index, 0))
+            for index in self.idx_known
+        }
 
 
     def above_cutoff_reads_by_idx(self) -> dict[str, int]:

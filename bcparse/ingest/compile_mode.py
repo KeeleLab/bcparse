@@ -5,7 +5,7 @@ Author:     CAG
 Version:    1.0.0
 Date:       2026/06/25
 
-Compile-mode pipeline for a series of Analysis workbooks with optional
+Compile-mode pipeline for a series of Analysis/Discovery workbooks with optional
 prior compiled base CSV.
 
 This module is intentionally linear, CompileMode.__init__ describes action.
@@ -20,7 +20,7 @@ Major classes and helpers:
         compile QC, RunSeries construction, and missing RunInfo synthesis.
 
     XlsxPathManager / AnalysisWorkbookParser
-        Discover parsed Analysis workbooks and normalize them into long-format
+        Discover parsed workbooks and normalize them into long-format
         compiled data plus RunInfo metadata.
 
     ParsedAnalysis / WorkbookParseError
@@ -60,7 +60,7 @@ class CompileMode:
 
     Inputs:
         CompileSettings object from CLI/user configuration:
-            - Analysis workbook directory/path settings
+            - parse workbook directory/path settings
             - optional base compiled CSV path
             - output prefix/path settings
             - compile/QC thresholds and behavior flags
@@ -77,9 +77,9 @@ class CompileMode:
     settings: CompileSettings  # Original user/CLI compile config.
     runtime_settings: dict[str, Any]  # Runtime compile settings dict.
 
-    xlsx_path_manager: XlsxPathManager  # Analysis workbook discovery helper.
-    xlsx_files: list[Path]  # Analysis workbook paths selected for parsing.
-    parsed_files: list[ParsedAnalysis]  # Parsed non-empty Analysis workbooks.
+    xlsx_path_manager: XlsxPathManager  # Parse workbook discovery helper.
+    xlsx_files: list[Path]  # Parse workbook paths selected for parsing.
+    parsed_files: list[ParsedAnalysis]  # Parsed non-empty parse workbooks.
     base_df: pd.DataFrame | None  # Optional prior compiled CSV dataframe.
 
     compile_frames: list[pd.DataFrame]  # Source-ranked long dataframe inputs.
@@ -98,14 +98,14 @@ class CompileMode:
             None  # For now, until I figure out how to detect stocks and do core search...
         )
 
-        # 1. Discover Analysis workbooks.
+        # 1. Discover parse workbooks.
         self.xlsx_path_manager = XlsxPathManager(
             wdir=self.runtime_settings["xlsx_path"]
         )
         self.xlsx_files = self.xlsx_path_manager.files
-        print(f"Discovered {len(self.xlsx_files)} Analysis workbook(s).")
+        print(f"Discovered {len(self.xlsx_files)} parse workbook(s).")
 
-        # 2. Parse each Analysis workbook.
+        # 2. Parse each workbook.
         self.parsed_files = []
         self._parse_analysis_workbooks()
 
@@ -144,7 +144,7 @@ class CompileMode:
 
     def _parse_analysis_workbooks(self) -> None:
         """
-        Parse discovered Analysis workbooks and retain non-empty parsed results.
+        Parse discovered workbooks and retain non-empty parsed results.
         """
         print()
         for i, filepath in enumerate(self.xlsx_files, start=1):
@@ -233,7 +233,7 @@ class CompileMode:
         # Fail loudly if there's no data. Duh.
         if not compile_frames:
             raise ValueError(
-                "No compile input data found. Provide at least one parsed Analysis workbook "
+                "No compile input data found. Provide at least one parsed workbook "
                 "or a non-empty base CSV."
             )
 
@@ -494,7 +494,7 @@ class CompileMode:
 
 class WorkbookParseError(ValueError):
     """
-    Raised when an Analysis workbook cannot be parsed into the expected format.
+    Raised when a parse workbook cannot be parsed into the expected format.
     """
 
     def __init__(self, message: str, *, filepath: str | Path | None = None) -> None:
@@ -523,7 +523,7 @@ class WorkbookParseError(ValueError):
 @dataclass
 class ParsedAnalysis:
     """
-    Container for one parsed Analysis workbook.
+    Container for one parsed Analysis or Discovery workbook.
     """
 
     run_id: str
@@ -539,14 +539,14 @@ class XlsxPathManager:
     Args:
         wdir: Working directory to search (defaults to the current directory).
         txtfile: Optional text file listing file paths (one per line).
-        pattern: Regex pattern to match filenames (defaults to '.*Analysis\\.xlsx$').
+        pattern: Regex pattern matching Analysis or Discovery workbooks.
     """
 
     def __init__(
         self,
         wdir: Optional[str] = None,
         txtfile: Optional[str] = None,
-        pattern: str = r".*Analysis\.xlsx$",
+        pattern: str = r".*(?:Analysis|Discovery)\.xlsx$",
     ) -> None:
         """
         Discover workbook paths from a directory scan or explicit text file.
@@ -638,7 +638,7 @@ class AnalysisWorkbookParser:
 
     def __init__(self, filepath: str | Path) -> None:
         """
-        Load and parse one Analysis workbook into normalized analysis data.
+        Load and parse one Analysis or Discovery workbook into normalized data.
         """
 
         self.filepath: Path = Path(filepath)
@@ -707,7 +707,7 @@ class AnalysisWorkbookParser:
 
     def _sheet_to_runinfo_df(self, first_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Convert the first sheet of an analysis workbook back into a headered runinfo table.
+        Convert the first sheet of a parse workbook back into a headered runinfo table.
         """
         if first_df.empty:
             return pd.DataFrame()
@@ -895,7 +895,7 @@ v1.0.0 20260625
     - Combines former ingest/compile.py source normalization, sample-level
       deduplication, compile QC, RunSeries construction, and missing RunInfo
       synthesis machinery.
-    - Combines former ingest/xlsx.py Analysis workbook discovery and parsing
+    - Combines former ingest/xlsx.py parse-workbook discovery and parsing
       machinery.
     - Keeps workbook/csv emission outside CompileMode in __main__/emit.
 """

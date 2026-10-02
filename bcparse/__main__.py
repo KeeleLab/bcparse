@@ -18,7 +18,7 @@ if __package__ in (None, ""):
 from bcparse.config import stocks
 from bcparse.settings import CompileSettings, ParseSettings
 
-ver = "4.3.1 - 2026.08.26"
+ver = "4.4.0 - 2026.10.01"
 
 description = f"""
 Name:       bcparse
@@ -29,7 +29,7 @@ Barcode parsing and compilation for short-read sequencing data.
 
 Two modes:
   Parse:    fastq + runinfo  ->  formatted Excel workbook + long-format csv
-  Compile:  directory of *Analysis.xlsx files, optional base long-format csv  ->  single compiled csv + xlsx
+  Compile:  directory of *Analysis.xlsx/*Discovery.xlsx files, optional base long-format csv  ->  single compiled csv + xlsx
 
 ------------------------------------------------------------------------------
 Installation
@@ -184,7 +184,7 @@ parser.add_argument(
     )
 
 parser.add_argument(
-    "--xlsx_path", type=str, help="path/to/dir with Analysis.xlsx files"
+    "--xlsx_path", type=str, help="path/to/dir with Analysis/Discovery.xlsx files"
     )
 
 parser.add_argument(

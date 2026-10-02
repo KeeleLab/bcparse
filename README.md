@@ -5,8 +5,8 @@
 It is specifically designed for analysis of the lab's proprietary barcoded SIV assays,
 and it supports two workflows:
 
-- **Parse mode**: FASTQ plus runinfo workbook -> per-run `Analysis.xlsx` and long-format CSV
-- **Compile mode**: one or more `*Analysis.xlsx` workbooks, optionally plus an existing compiled CSV -> compiled CSV and review workbook
+- **Parse mode**: FASTQ plus runinfo workbook -> per-run `Analysis.xlsx` or `Discovery.xlsx` and long-format CSV
+- **Compile mode**: one or more parse workbooks, optionally plus an existing compiled CSV -> compiled CSV and review workbook
 
 The package includes the reference FASTA and primer CSV files in `bcparse/ref/`, so installed runs are self-contained.
 
@@ -58,7 +58,7 @@ pipx install git+https://github.com/chazgoo/bcparse.git
 pip install git+https://github.com/chazgoo/bcparse.git
 
 # For a specific tag, branch, or commit:
-uv tool install git+https://github.com/chazgoo/bcparse.git@v4.3.0
+uv tool install git+https://github.com/chazgoo/bcparse.git@v4.4.0
 ```
 
 Once installed, `bcparse` can be run from any directory:
@@ -134,8 +134,9 @@ Inputs:
 Outputs:
 
 - `<run_name>_concat.csv`: normalized long-format output
-- `<run_name>_Analysis.xlsx`: runinfo, sample tables, group matrices, and
-  analysis settings
+- `<run_name>_Analysis.xlsx`: reference-backed runinfo, sample tables, group
+  matrices, and analysis settings
+- `<run_name>_Discovery.xlsx`: the same workbook structure for discovery profiles
 
 ### Args
 | Parameter                 | Required? | Default          | Description                                                            |
@@ -162,6 +163,8 @@ Outputs:
 Configured stock profiles currently include:
 
 ```text
+M_discover
+X_discover
 239M
 239M2
 239X/INT
@@ -176,10 +179,41 @@ SHIV_224M
 SHIV_304M
 SHIV_1051M
 SHIV_1054M
-SL8_1-8_239M
+SL8_239M
+TAT_SL8
 ```
 
 Reference data is prepackaged in this repo.
+
+### Barcode Discovery
+
+`M_discover` and `X_discover` use the corresponding M or X extraction profile
+without loading a stock barcode reference FASTA. Exact barcode sequences are
+ranked across the run as uppercase `BC.1`, `BC.2`, and so on. Count ties are
+resolved by sequence, and the same sequence keeps the same `BC.N` name in every
+sample from that run.
+
+Discovery barcodes participate in the normal per-sample full-sequence distance
+checks. `BC.N` numbering is local to one run; use `bc_seq`, not the rank label,
+as the durable molecular identity across runs.
+
+The existing `--append_spike_ref` option remains available. Exact matches to an
+appended reference retain their configured names, while unmatched sequences use
+`BC.N` names and do not include exact reference matches in their rank numbering.
+
+Example:
+
+```bash
+bcparse \
+  --sample_path path/to/new_stock.fastq.gz \
+  --runinfo_path path/to/runinfo.xlsx \
+  --out_path path/to/output \
+  --stock M_discover
+```
+
+`Manual CLI` also asks whether barcode discovery should be used. In manual
+discovery, the barcode-reference path is omitted while the custom extraction
+targets and primer paths are still required.
 
 ### Runinfo Workbook
 
@@ -229,14 +263,14 @@ This runinfo format is required.
 
 ## Compile Mode
 
-Compile mode combines parse-mode `*Analysis.xlsx` files into a cross-run
-dataset.
+Compile mode combines parse-mode `*Analysis.xlsx` and `*Discovery.xlsx` files
+into a cross-run dataset.
 
 Pipeline:
 
 ```text
-Analysis workbooks and optional base CSV
-  -> discover/parse Analysis workbooks
+Analysis/Discovery workbooks and optional base CSV
+  -> discover/parse workbooks
   -> read optional base CSV
   -> normalize compile frames
   -> attach compile source provenance
@@ -250,7 +284,7 @@ Analysis workbooks and optional base CSV
 
 Inputs:
 
-- `xlsx_path`: directory containing `*Analysis.xlsx` workbooks
+- `xlsx_path`: directory containing `*Analysis.xlsx` and/or `*Discovery.xlsx` workbooks
 - `out_path`: output directory
 - `out_prefix`: compiled output name prefix
 - optional `base_csv_path`
@@ -263,14 +297,14 @@ Outputs:
   sample tables, matrices, and optional QC sheets
 
 Compile mode deduplicates by `sample_id`. When the same sample is present in
-multiple inputs, parsed Analysis workbooks are preferred over base CSV rows,
+multiple inputs, parsed workbooks are preferred over base CSV rows,
 then newer workbook modification time and input order break remaining ties.
 
 ### Args
 | Parameter                 | Required? | Default          | Description                                                                         |
 | ------------------------- | --------- | ---------------- | ----------------------------------------------------------------------------------- |
 | `--compile`               | Yes       | `False`          | Run compile mode instead of parse mode.                                             |
-| `--xlsx_path`             | Yes       |                  | Path to directory containing `*Analysis.xlsx` files.                                |
+| `--xlsx_path`             | Yes       |                  | Path to directory containing `*Analysis.xlsx` and/or `*Discovery.xlsx` files.       |
 | `--out_path`              | Yes       |                  | Output directory.                                                                   |
 | `--out_prefix`            | Yes       |                  | Prefix for compiled output files.                                                   |
 | `--base_csv_path`         | No        | `None`           | Optional path to a previous compiled `*_all.csv` to merge with new parsed analyses. |

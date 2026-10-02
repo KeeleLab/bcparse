@@ -60,7 +60,7 @@ class ParseSettings:
 class CompileSettings:
 
     # Required
-    xlsx_path:      str = ""    # Path to dir with Analysis.xlsx files
+    xlsx_path:      str = ""    # Path to dir with Analysis/Discovery.xlsx files
     out_path:       str = ""    # Path to output directory
     out_prefix:     str = ""    # Prefix for output files (e.g. 'run1' to produce run1_compiled.csv)
     # Optional

@@ -75,7 +75,7 @@ def sidelong_tables(df: pd.DataFrame, legacy_format: bool = False):
 
     for split_id, split_df in split_dfs.items():
         # Prefer the native analysis-pipe parent column, but fall back to the
-        # workbook-imported ldist column when compiling from Analysis.xlsx.
+        # workbook-imported ldist column when compiling from a parse workbook.
         if (
             "putative_parent" in split_df.columns
             and split_df["putative_parent"].notna().any()
