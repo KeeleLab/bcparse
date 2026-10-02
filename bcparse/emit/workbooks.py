@@ -17,6 +17,7 @@ import pandas as pd
 
 import bcparse.qc as qc
 from bcparse.containers.runseries import RunSeries
+from bcparse.containers.runinfo import RunInfo
 from bcparse.containers.seqrun import SeqRun
 
 # %% Parse workbook
@@ -173,8 +174,14 @@ def _modify_runinfo(
     modified_runinfo["n_reads_ac"] = index_key.map(
         parse_run.above_cutoff_reads_by_idx()
     )
+
+    input_totals = pd.Series(index=modified_runinfo.index, dtype="float64")
+    sample_rows = index_key.notna()
+    input_totals.loc[sample_rows] = RunInfo.normalize_input(
+        modified_runinfo.loc[sample_rows, "Input TOTAL PER BARCODE"]
+    )
     modified_runinfo["count-to-input_ratio"] = (
-        modified_runinfo["n_reads"] / modified_runinfo["Input TOTAL PER BARCODE"]
+        modified_runinfo["n_reads"] / input_totals
     )
 
     if idx_notes:

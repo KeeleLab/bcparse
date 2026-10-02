@@ -7,6 +7,7 @@
     - Apply the existing per-sample distance QC to all discovered barcodes
     - Emit `<run_name>_Discovery.xlsx`
     - Compile mode discovers both Analysis and Discovery workbooks
+2. Promote RunInfo.normalize_input() to public, apply to emitted workbooks so "," in input values doesn't error out.
 
 ### [4.3.1] - New configs
 1. Added TAT_SL8 epitope config, previous SL8 configuration reorganized in config.py
@@ -252,11 +253,6 @@ preserved in `bcParse_history_YYYYMMDD.tar.gz`.
 ---
 
 # Development Ideas
-
-## Known bugs:
--  Bug: parse output workbook fails when Input TOTAL PER BARCODE in the runinfo Excel file is stored as text with comma separators, e.g. "300,000". Internal runinfo parsing normalizes this for sample metadata, but workbook emission later uses the raw runinfo column to calculate count-to-input_ratio:
-    - n_reads / Input TOTAL PER BARCODE
-    - This raises TypeError: unsupported operand type(s) for /: 'float' and 'str'. Fix should coerce/normalize the denominator before calculating the ratio, ideally reusing the existing comma-stripping input normalization logic.
 
 ## Report M/M2 VPX overlap
 

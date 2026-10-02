@@ -158,7 +158,7 @@ class RunInfo:
 
         # Normalize values
         sample_df["samp_date"] = sample_df["samp_date"].apply(normalize_date)
-        sample_df["input"] = cls._normalize_input(sample_df["input"])
+        sample_df["input"] = cls.normalize_input(sample_df["input"])
         sample_df["samp_group"] = (
             sample_df["samp_group"].map(normalize_label).astype("string")
         )
@@ -420,7 +420,7 @@ class RunInfo:
         return df.iloc[:, 0].iloc[next_idx] if next_idx < len(df) else None
 
     @staticmethod
-    def _normalize_input(series: pd.Series) -> pd.Series:
+    def normalize_input(series: pd.Series) -> pd.Series:
         """
         Coerce input column to numeric, accepting 'inf' as a valid value.
         """
