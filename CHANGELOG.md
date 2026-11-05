@@ -254,6 +254,14 @@ preserved in `bcParse_history_YYYYMMDD.tar.gz`.
 
 # Development Ideas
 
+## Add p7-side bc ref for dual-index parsing?
+
+Identified issue while adding pre/post_vif modes.
+
+Dual-index parsing uses `ref_bc` <-> `ref_p7` to extract barcode. Req's `ref_p7` to cover between bc and p7 index, which can be long. Longer sequence = greater chance for ref mismatch/disqualified read.
+
+Instead of using `ref_p7` dual purpose to flank barcode and p7 index, may need a p7-side 'ref_bc' to add flexibility to that operation. Alternatively, limit the barcode to `tlen_bc` bases extending from `ref_bc` instead of the full interval between `ref_p7` and `ref_bc`. But I like that less.
+
 ## Report M/M2 VPX overlap
 
 - Keep dual-index `fill_seq` behavior: rebuild short observations into the expected 34 bp reference shape before barcode assignment.
@@ -778,75 +786,3 @@ Add smoke checks covering:
 7. Extracted concrete index sequences still map to the expected sample.
 
 
-# Current Architecture Notes
-
-Date: 2026-06-25
-
-This replaces the pre-consolidation Codex assessment. Resolved items from that
-assessment were removed rather than kept as stale guidance.
-
-Resolved since the original assessment:
-- Parse and compile ingest now live in linear mode modules:
-  - `bcparse/ingest/parse_mode.py`
-  - `bcparse/ingest/compile_mode.py`
-- Former standalone ingest modules were retired:
-  - `countdict.py`
-  - `fastq.py`
-  - `compile.py`
-  - `xlsx.py`
-- `SeqSamp.from_table()` was removed; parse/compile modes now own tabular
-  construction and call `SeqSamp(...)` directly.
-- `SeqRun.from_long_df()` and flexible sample coercion were removed; parse and
-  compile modes now materialize `SeqRun` objects explicitly.
-- `RunSeries` construction is compile-mode owned and accepts one internal shape.
-- `parents.py` now uses required `dist_threshold` access and has clean focused
-  ruff/basedpyright checks.
-- Mermaid diagrams were updated for the current mode-first/container-light flow.
-
-Still-live cleanup themes:
-
-1. Settings/default ownership
-   - CLI, GUI, settings dataclasses, and runtime dicts still need a final call
-     on where defaults and validation live.
-   - Preferred direction remains: keep `ParseSettings`/`CompileSettings` as the
-     user-facing config contract, convert to runtime dicts only where practical.
-
-2. Long-dataframe contract boundaries
-   - `normalize_long_df()` is still a broad repair/finalization function.
-   - Future cleanup could split permissive external normalization from stricter
-     internal contract validation.
-
-3. Emit/view complexity
-   - `emit/views.py` and `emit/workbooks.py` remain the densest user-facing
-     formatting layer.
-   - Sidelong table construction, matrix pivoting, date display normalization,
-     and optional QC output are the main cleanup targets.
-
-4. Legacy compatibility decisions
-   - Decide which legacy workbook/input/output shapes still matter.
-   - If old formats stay, quarantine them behind clearly named legacy adapters
-     instead of letting them dominate the current path.
-
-5. Known bug / output hardening
-   - Parse output can still fail when raw runinfo input values contain comma
-     separators, e.g. `Input TOTAL PER BARCODE = "300,000"`.
-   - Fix should reuse normalized input values or coerce raw runinfo output fields
-     before calculating workbook ratios.
-
-6. Test and harness coverage
-   - Add small characterization fixtures before deleting more emit/workbook or
-     legacy compatibility code.
-   - Minimum useful fixtures:
-     - one FASTQ + runinfo parse fixture
-     - one current-format Analysis workbook compile fixture
-
-7. Packaging/dev-material cleanup
-   - Revisit whether `_misc_` files should be shipped as package data.
-   - Runtime references/templates should stay packaged; dev notes, mermaids,
-     notebooks, R scratch, and workspace files probably should not ship.
-
-8. Entry-point ownership
-   - `bcparse/__main__.py` still owns CLI construction, orchestration, logging,
-     interactive return objects, and user-facing help text.
-   - It is workable, but future cleanup could split parser construction from
-     parse/compile orchestration once behavior is stable.

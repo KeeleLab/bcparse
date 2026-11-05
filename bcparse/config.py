@@ -103,6 +103,10 @@ SL8:
 
     Primers added to P5/P7_primers.csv, require prefix "SL8" in runinfo, Eg. SL8.P5_1/SL8.P7_1.
 
+pre/post VIF
+
+    Add section...
+
 """
 
 # Base read processing params
@@ -163,6 +167,32 @@ base_opts = {
         "dualindex": False,
         "core_bc": None,
     },
+    "pre_VIF": {
+        "rdir": "rev",
+        "ref_p5": "CTGCTATCCACCTCTTTTCC", # stHIVpreVIF.P5 binding
+        "tdir_p5": "upstream",
+        "tlen_p5": 8,
+        "ref_bc": "ATGGAGGAGGAAAAGAGGTGGATAGCAG", # revcomp VIF bc flank
+        "tdir_bc": "upstream",
+        "tlen_bc": 34,
+        "primer_path": ref_path("P5_primers.csv"),
+        "append_spike_ref": False,
+        "dualindex": False,
+        "core_bc": None,
+    },
+    "post_VIF": {
+        "rdir": "rev",
+        "ref_p5": "CATTGTATGGCTCCCTCTGTG", # stHIVpostVIF.P5 binding
+        "tdir_p5": "upstream",
+        "tlen_p5": 8,
+        "ref_bc": "ATGGAACAAGCCCCAGAAGACCAAGGGC", #revcomp VPR bc flank
+        "tdir_bc": "upstream",
+        "tlen_bc": 34,
+        "primer_path": ref_path("P5_primers.csv"),
+        "append_spike_ref": False,
+        "dualindex": False,
+        "core_bc": None,
+    },
 
 }
 
@@ -184,7 +214,23 @@ dual_index_opts = {
         "p7_path": ref_path("P7_primers.csv"),
         "fill_seq": None,  # No fill for X series
     },
-    # "SL8_1-8":{},
+    "pre_VIF": {
+        "dualindex": True,
+        "ref_p7": "TGACGATTGTGTGGCAAGTAGACAGGACGAGGATTAA",  # revcomp stHIVpreVIF.P7 + POL bc flank
+        "tdir_p7": "upstream",
+        "tlen_p7": 7, # Make sure this is real...
+        "p7_path": ref_path("P7_primers.csv"),
+        "fill_seq": None,
+    },
+    "post_VIF": {
+        "dualindex": True,
+        "ref_p7": "CAAAAGTCTTGGGAATACTGGCCTGA",  # revcomp stHIVpostVIF.P7 + VIF bc flank
+        "tdir_p7": "upstream",
+        "tlen_p7": 8,
+        "p7_path": ref_path("P7_primers.csv"),
+        "fill_seq": None,
+    },
+    # "SL8_bc":{},
     # dual index is not currently applicable:
     # barcode = seq between ref_p7 and ref_bc, not fixed 34 nt upstream of ref_bc.
     # For joined SL8, this returns long construct sequence; the real 239M barcode would be the final 34 nt.
@@ -271,6 +317,16 @@ settings_opts = {
     },
     "X_discover": {
         "base_profile": "X",
+        "discover": True,
+        "barcode_path": None,
+    },
+    "preVIF_discover": {
+        "base_profile": "pre_VIF",
+        "discover": True,
+        "barcode_path": None,
+    },
+    "postVIF_discover": {
+        "base_profile": "post_VIF",
         "discover": True,
         "barcode_path": None,
     },
