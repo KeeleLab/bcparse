@@ -2,18 +2,18 @@
 
 ### [4.5.0] - FASTQ screen mode
 1. Added a standalone Screen mode for run-level read-profile and stock composition.
-2. Refactored FASTQ extraction around independently compiled `fq_profile_parser`
-   instances shared by Parse and Screen modes.
-3. Added `_Screen.xlsx` output with consolidated summary tables, per-profile
-   long barcode tables, explicit ambiguity reporting, and screen settings.
-4. Screen stock references now follow configured stocks dynamically, with explicit
-   239M, 239M2, and SHIV174 exclusions and Spike canonicalization.
-5. Added optional nearest-reference barcode matching with an exact-only default,
-   performed once per distinct profile/barcode sequence.
-6. Added Parse-style reference-match reporting: single exact matches remain
-   named, inexact matches become `Unique.N`, and tied matches become `Multi.N`.
-7. Added CLI and GUI Screen entry points with FASTQ and FASTQ.GZ support.
-8. Renamed the mode-orchestration package from `ingest` to `modes`.
+  - Refactored FASTQ extraction around independently compiled `fq_profile_parser`
+    instances shared by Parse and Screen modes.
+  - Added `_Screen.xlsx` output with consolidated summary tables, per-profile
+    long barcode tables, explicit ambiguity reporting, and screen settings.
+  - Screen stock references now follow configured stocks dynamically, with explicit
+    239M, 239M2, and SHIV174 exclusions and Spike canonicalization.
+  - Added optional nearest-reference barcode matching with an exact-only default,
+    performed once per distinct profile/barcode sequence.
+  - Added Parse-style reference-match reporting: single exact matches remain
+    named, inexact matches become `Unique.N`, and tied matches become `Multi.N`.
+  - Added CLI and GUI Screen entry points with FASTQ and FASTQ.GZ support.
+  - Renamed the mode-orchestration package from `ingest` to `modes`.
 
 ### [4.4.1] - pre/post-VIF profiles
 1. Added `preVIF_discover` and `postVIF_discover` parse profiles, read structure, and refs
