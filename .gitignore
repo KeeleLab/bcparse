@@ -33,6 +33,7 @@ env/
 
 # Internal dev workspace, distributed separately as needed
 **/_misc_/
+tests/
 
 # Agent-local notes
 agents.md
