@@ -16,9 +16,9 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bcparse.config import stocks
-from bcparse.settings import CompileSettings, ParseSettings
+from bcparse.settings import CompileSettings, ParseSettings, ScreenSettings
 
-ver = "4.4.0 - 2026.10.01"
+ver = "4.5.0 - 2026.11.10"
 
 description = f"""
 Name:       bcparse
@@ -27,8 +27,9 @@ Version:    {ver}
 
 Barcode parsing and compilation for short-read sequencing data.
 
-Two modes:
+Three modes:
   Parse:    fastq + runinfo  ->  formatted Excel workbook + long-format csv
+  Screen:   fastq            ->  run-level profile/stock screening workbook
   Compile:  directory of *Analysis.xlsx/*Discovery.xlsx files, optional base long-format csv  ->  single compiled csv + xlsx
 
 ------------------------------------------------------------------------------
@@ -53,6 +54,7 @@ directory only affects where GUI file dialogs open by default.
 
 GUI:
   bcparse --gui                 # parse mode
+  bcparse --gui --screen        # screen mode
   bcparse --gui --compile       # compile mode
 
 Parse (CLI):
@@ -60,6 +62,11 @@ Parse (CLI):
           --runinfo_path path/to/runinfo.xlsx \\
           --out_path path/to/output \\
           --stock 239M --dualindex
+
+Screen (CLI):
+  bcparse --screen \\
+          --sample_path path/to/sample.fastq \\
+          --out_path path/to/output
 
 Compile (CLI):
   bcparse --compile \\
@@ -178,10 +185,16 @@ parser.add_argument(
 
 parser.add_argument("--gui", action="store_true", help="Use GUI for file selection")
 
-# --- COMPILE MODE ARGS ---
-parser.add_argument(
+# --- MODE SELECTION ---
+mode_group = parser.add_mutually_exclusive_group()
+mode_group.add_argument(
+    "--screen", action="store_true", help="Run FASTQ profile/stock screen"
+    )
+mode_group.add_argument(
     "--compile", action="store_true", help="Run compile protocol instead of parsing"
     )
+
+# --- COMPILE MODE ARGS ---
 
 parser.add_argument(
     "--xlsx_path", type=str, help="path/to/dir with Analysis/Discovery.xlsx files"
@@ -218,7 +231,10 @@ parser.add_argument(
     )
 
 parser.add_argument(
-    "--dist_threshold", type=int, default=1, help="Distance cutoff for parent checks"
+    "--dist_threshold",
+    type=int,
+    default=None,
+    help="Levenshtein-distance threshold (default: Screen 0; Parse/Compile 1)",
     )
 
 # %% Parse Mode
@@ -227,10 +243,10 @@ def run_parse_mode(args):
 
     # Mode-specific imports
     from bcparse.emit.workbooks import write_parse_workbook
-    from bcparse.ingest.parse_mode import ParseMode
+    from bcparse.modes.parse_mode import ParseMode
 
     """
-    1. Initialize arguments and run settings. See bcparse/config.py, bcparse/ingest/parse_mode.py, bcparse/gui/
+    1. Initialize arguments and run settings. See bcparse/config.py, bcparse/modes/parse_mode.py, bcparse/gui/
 
     - Required args are sample_path, runinfo_path, out_path, and stock.
     - See bcparse/config.py for stock options, e.g. "239M"
@@ -258,7 +274,11 @@ def run_parse_mode(args):
             mask=getattr(args, "mask"),
             collapse_ambig=getattr(args, "collapse_ambig"),
             mask_qual=getattr(args, "mask_qual"),
-            dist_threshold=getattr(args, "dist_threshold"),
+            dist_threshold=(
+                1
+                if getattr(args, "dist_threshold") is None
+                else getattr(args, "dist_threshold")
+            ),
             filt_mat_ac=getattr(args, "filt_mat_ac"),
             legacy_format=getattr(args, "legacy_format"),
             collapse_to_parent=getattr(args, "collapse_to_parent"),
@@ -274,13 +294,11 @@ def run_parse_mode(args):
 
     print(
         f"""
-
     ▌     ▄▖▄▖▄▖▄▖▄▖
     ▛▌▛▘  ▙▌▌▌▙▘▚ ▙▖
     ▙▌▙▖▗ ▌ ▛▌▌▌▄▌▙▖
     {ver}
     Keele lab, ACVP, FNLCR
-
     """
     )
 
@@ -303,13 +321,87 @@ def run_parse_mode(args):
     # In case of -i run, to examine:
     return parse_run, seq_run, settings
 
+
+# %% Screen Mode
+
+def run_screen_mode(args):
+
+    # Mode-specific imports
+    from bcparse.emit.workbooks import write_screen_workbook
+    from bcparse.modes.screen_mode import ScreenMode
+
+    """
+    1. Initialize arguments and screen settings. See bcparse/config.py,
+    bcparse/modes/screen_mode.py, and bcparse/gui/screen.py.
+
+    - Required args are sample_path and out_path.
+    - RunInfo and a declared stock are not used in screen mode.
+    - Remaining args have defaults set above or in ScreenSettings.
+    """
+
+    # If running with --gui...
+    if args.gui:
+        from bcparse.gui.screen import ScreenArgSelectionGUI
+
+        # Set variables returned from tkinter object
+        params = ScreenArgSelectionGUI().run()
+        print("GUI params:", params)
+
+    # Otherwise use CLI args.
+    else:
+        params = ScreenSettings(
+            sample_path=getattr(args, "sample_path"),
+            out_path=getattr(args, "out_path"),
+            mean_qual=getattr(args, "mean_qual"),
+            mismatches=getattr(args, "mismatches"),
+            dist_threshold=(
+                0
+                if getattr(args, "dist_threshold") is None
+                else getattr(args, "dist_threshold")
+            ),
+            mask=getattr(args, "mask"),
+            mask_qual=getattr(args, "mask_qual"),
+        ).to_dict()
+
+    try:
+        screen_settings = ScreenSettings.from_mapping(params)
+        screen_settings.validate()
+    except ValueError as e:
+        print(str(e))
+        return
+
+    print(
+        f"""
+    ▌     ▄▖▄▖▄▖▄▖▄▖▖ ▖
+    ▛▌▛▘  ▚ ▌ ▙▘▙▖▙▖▛▖▌
+    ▙▌▙▖▗ ▄▌▙▖▌▌▙▖▙▖▌▝▌
+    {ver}
+    Keele lab, ACVP, FNLCR
+    """
+    )
+
+    """
+    2. Main analysis: build one run-level screen from screen settings.
+    """
+    screen_run = ScreenMode(settings=screen_settings)
+    settings = screen_run.runtime_settings
+
+    """
+    3. Main output.
+    """
+    workbook_path = write_screen_workbook(screen_run)
+    print(f"Screen complete: {workbook_path}")
+
+    # In case of -i run, to examine:
+    return screen_run, None, settings
+
 # %% Compile Mode
 
 def run_compile_mode(args):
 
     # Mode-specific imports:
     from bcparse.emit.workbooks import write_compile_workbook
-    from bcparse.ingest.compile_mode import CompileMode
+    from bcparse.modes.compile_mode import CompileMode
 
     # Define expected parameters
     # If running with --gui...
@@ -330,7 +422,11 @@ def run_compile_mode(args):
             ldist_samp_lvl=getattr(args, "ldist_samp_lvl"),
             ldist_group_lvl=getattr(args, "ldist_group_lvl"),
             contam_check=getattr(args, "contam_check"),
-            dist_threshold=getattr(args, "dist_threshold"),
+            dist_threshold=(
+                1
+                if getattr(args, "dist_threshold") is None
+                else getattr(args, "dist_threshold")
+            ),
             collapse_to_parent=getattr(args, "collapse_to_parent"),
         ).to_dict()
 
@@ -343,13 +439,11 @@ def run_compile_mode(args):
 
     print(
         f"""
-
     ▌     ▄▖▄▖▖  ▖▄▖▄▖▖ ▄▖
     ▛▌▛▘  ▌ ▌▌▛▖▞▌▙▌▐ ▌ ▙▖
     ▙▌▙▖▗ ▙▖▙▌▌▝ ▌▌ ▟▖▙▖▙▖
     {ver}
     Keele lab, ACVP, FNLCR
-
     """
     )
 
@@ -373,7 +467,7 @@ def main():
     """
     Entry point for `python -m bcparse`.
 
-    Parses CLI args and runs either Parse or Compile mode.
+    Parses CLI args and runs Parse, Screen, or Compile mode.
     Returns key objects so they can be accessed interactively
     (e.g., with `python -i -m bcparse ...`).
     """
@@ -389,7 +483,9 @@ def main():
     args = parser.parse_args()
 
     # Run the correct mode and return its result
-    if args.compile:
+    if args.screen:
+        return run_screen_mode(args)
+    elif args.compile:
         return run_compile_mode(args)
     else:
         return run_parse_mode(args)
@@ -408,13 +504,13 @@ if __name__ == "__main__":
 
     # Expose objects for -i interactive sessions
     if _ret is not None:
-        # Unpack exactly in the order returned by run_parse_mode() or run_compile_mode().
+        # Unpack exactly in the order returned by each mode runner.
         mode_run, container, settings = _ret
 
         # Optional: print a short confirmation
         print(
             "\nRun with -i (interactive)? Python env will retain:"
-            "\n  mode_run   → parse/compile mode object"
-            "\n  container  → parse SeqRun or compile RunSeries"
+            "\n  mode_run   → parse/screen/compile mode object"
+            "\n  container  → SeqRun, RunSeries, or None for Screen"
             "\n  settings   → runtime settings dictionary\n"
         )

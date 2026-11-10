@@ -14,7 +14,7 @@ from bcparse.qc.identity import (
     normalize_date,
     normalize_long_df,
 )
-from bcparse.qc.parents import flag_putative_parents
+from bcparse.qc.parents import flag_putative_parents, parent_suffix_sub
 
 __all__ = [
     "annotate_x_idx",
@@ -30,5 +30,6 @@ __all__ = [
     "make_sample_id",
     "normalize_date",
     "normalize_long_df",
+    "parent_suffix_sub",
     "rank_uniques",
 ]

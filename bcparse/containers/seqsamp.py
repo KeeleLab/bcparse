@@ -119,9 +119,9 @@ It represents one logical sample after ingest has already produced a
 sample-scoped long-format dataframe.
 
 Construction:
- - ingest/parse_mode.py builds SeqSamp objects directly from parsed FASTQ data
+ - modes/parse_mode.py builds SeqSamp objects directly from parsed FASTQ data
    after runinfo merge and per-sample QC.
- - ingest/compile_mode.py builds SeqSamp objects directly from final compiled
+ - modes/compile_mode.py builds SeqSamp objects directly from final compiled
    long-dataframe slices grouped by sample_id.
  - SeqSamp does not own dataframe-to-sample construction helpers; mode classes
    decide how sample metadata is recovered from their own input formats.

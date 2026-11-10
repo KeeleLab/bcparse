@@ -74,7 +74,7 @@ deduplicated series of sequencing runs after compile_mode.py has normalized,
 merged, and QC-annotated long-format input data.
 
 Construction:
- - ingest/compile_mode.py is the current external construction path.
+ - modes/compile_mode.py is the current external construction path.
  - CompileMode creates a final combined long dataframe, then calls its
    _build_runseries() method.
  - Compile-mode construction splits the dataframe by run_id and builds one
@@ -101,7 +101,7 @@ Downstream consumers:
 """
 v2.1.0 20260623
  - Dropped over-flexible input types in lieu of trusting upstream contract
- - Moved compile dataframe materialization into ingest/compile_mode.py
+ - Moved compile dataframe materialization into modes/compile_mode.py
  - Formatting and comments
 
 v2.0.0 20260526

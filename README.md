@@ -3,9 +3,10 @@
 `bcparse` is developed and maintained for the [Keele Lab - RES, ACVP, FNLCR](https://github.com/KeeleLab).
 
 It is specifically designed for analysis of the lab's proprietary barcoded SIV assays,
-and it supports two workflows:
+and it supports three workflows:
 
 - **Parse mode**: FASTQ plus runinfo workbook -> per-run `Analysis.xlsx` or `Discovery.xlsx` and long-format CSV
+- **Screen mode**: FASTQ -> run-level read-profile and stock composition workbook
 - **Compile mode**: one or more parse workbooks, optionally plus an existing compiled CSV -> compiled CSV and review workbook
 
 The package includes the reference FASTA and primer CSV files in `bcparse/ref/`, so installed runs are self-contained.
@@ -15,6 +16,7 @@ The package includes the reference FASTA and primer CSV files in `bcparse/ref/`,
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Parse Mode](#parse-mode)
+- [Screen Mode](#screen-mode)
 - [Compile Mode](#compile-mode)
 - [Changelog](#changelog)
 - [License](#license)
@@ -58,7 +60,7 @@ pipx install git+https://github.com/chazgoo/bcparse.git
 pip install git+https://github.com/chazgoo/bcparse.git
 
 # For a specific tag, branch, or commit:
-uv tool install git+https://github.com/chazgoo/bcparse.git@v4.4.0
+uv tool install git+https://github.com/chazgoo/bcparse.git@v4.5.0
 ```
 
 Once installed, `bcparse` can be run from any directory:
@@ -83,6 +85,12 @@ Launch the compile GUI:
 bcparse --gui --compile
 ```
 
+Launch the screen GUI:
+
+```bash
+bcparse --gui --screen
+```
+
 Parse one sequencing run from the command line:
 
 ```bash
@@ -92,6 +100,14 @@ bcparse \
   --out_path path/to/output \
   --stock 239M \
   --dualindex
+```
+
+Screen one FASTQ without RunInfo or a declared stock:
+
+```bash
+bcparse --screen \
+  --sample_path path/to/sample.fastq.gz \
+  --out_path path/to/output
 ```
 
 Compile parsed analyses:
@@ -260,6 +276,33 @@ This runinfo format is required.
 
 - Additional metadata columns may be added after the required columns.
     - These columns are passed through to the output runinfo sheet.
+
+## Screen Mode
+
+Screen mode examines one FASTQ across every configured structural profile before
+sample-level parsing. It does not require RunInfo or a declared stock and writes
+`<fastq_name>_Screen.xlsx` with a consolidated Summary, per-profile barcode
+tables, Ambiguous barcodes, and Screen settings sheets.
+
+P5, P7, and barcode-flank anchors use the configured fuzzy mismatch tolerance.
+Extracted biological barcodes use exact stock-reference matches by default; an
+optional barcode edit distance enables nearest-reference matching. The M profile
+uses the combined `M+M2` reference, and the sequence-identical SHIV174M/Spike
+reference is reported as `Spike`.
+
+### Args
+
+| Parameter       | Required? | Default | Description                                      |
+| --------------- | --------- | ------- | ------------------------------------------------ |
+| `--screen`      | Yes       | `False` | Run Screen mode instead of Parse mode.           |
+| `--sample_path` | Yes       |         | Path to input FASTQ/FASTQ.GZ file.               |
+| `--out_path`    | Yes       |         | Output directory.                                |
+| `--mean_qual`   | No        | `30`    | Minimum mean Phred for extracted targets.        |
+| `--mismatches`  | No        | `1`     | Allowed substitutions in structural anchors.    |
+| `--dist_threshold` | No     | `0`     | Barcode-to-reference ldist threshold.             |
+| `--mask`        | No        | `False` | Mask low-quality bases before profile matching.  |
+| `--mask_qual`   | No        | `20`    | Phred threshold used when masking bases.         |
+| `--gui`         | No        | `False` | Use the dedicated Screen input-selection GUI.    |
 
 ## Compile Mode
 

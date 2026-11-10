@@ -3,8 +3,8 @@
 """
 Name:      config.py
 Author:     CAG
-Version:    1.7
-Date:       2026/3/20
+Version:    1.8
+Date:       2026/11/10
 
 Description:
     Configure stock-specific settings for fastq read parsing.
@@ -54,7 +54,7 @@ M/VPX; 239M/M2/dual-index, NIRM, OptM, dGYM, SHIV:
 
     < 34 - length(bc_seq) bases 5' vpx_end 3' :: 5' bc_seq 3' >
 
-    ... see parse_mode.py/parse_fastq_rec/match_extract_dual_targ().
+    ... see parse_mode.py/fq_profile_parser.match_extract_dual_targ().
     If vpx_end is not provided, the actual short sequence will be returned.
 
 X/INT:
@@ -332,6 +332,10 @@ settings_opts = {
     },
 }
 
+# Screen mode follows the configured stock/profile dictionaries automatically.
+# These three reference-backed aliases are the only deliberate exclusions.
+screen_stock_exclusions = frozenset({"239M", "239M2", "SHIV_174M"})
+
 # List of available stocks
 stocks = list(settings_opts.keys()) + ["Manual CLI"]
 
@@ -422,8 +426,74 @@ def get_stock_settings(stock: str, dualindex: bool, append_spike_ref: bool = Fal
     return settings_dict
 
 
+def get_screen_profile_settings() -> dict[str, dict[str, dict]]:
+    """
+    Return independent single/dual parser settings for every screen profile
+    """
+    profiles: dict[str, dict[str, dict]] = {}
+
+    # Pull read profiles to dict
+    for profile_name, base_settings in base_opts.items():
+
+        # Single index
+        single = base_settings.copy()
+        single["base_profile"] = profile_name
+        single["dualindex"] = False
+        variants = {"single": single}
+
+        # Add dual index
+        if profile_name in dual_index_opts:
+            dual = single.copy()
+            dual.update(dual_index_opts[profile_name].copy())
+            variants["dual"] = dual
+
+        # Compile all variants
+        profiles[profile_name] = variants
+
+    return profiles
+
+
+def get_screen_stock_settings() -> dict[str, dict[str, str]]:
+    """
+    Generate dict of per-profile barcode refs
+    """
+
+    # Initialize one stock-reference dict per read profile
+    screen_stocks: dict[str, dict[str, str]] = {
+        profile: {} for profile in base_opts
+    }
+
+    # Pull configured stock references into their read profiles
+    for stock, stock_settings in settings_opts.items():
+
+        # Skip stock references replaced by the composite/control references
+        if stock in screen_stock_exclusions:
+            continue
+
+        # Require a configured profile and barcode reference
+        profile = stock_settings.get("base_profile")
+        barcode_path = stock_settings.get("barcode_path")
+        if profile not in screen_stocks or not barcode_path:
+            continue
+
+        # Add stock reference to its profile
+        screen_stocks[profile][stock] = str(barcode_path)
+
+    # Add every configured control reference to every read profile
+    for control, control_settings in controls_opts.items():
+        control_path = control_settings.get("spike_path")
+        if not control_path:
+            continue
+        for stocks_by_profile in screen_stocks.values():
+            stocks_by_profile[control] = str(control_path)
+
+    # Compile all per-profile stock/control references
+    return screen_stocks
+
+
 # %% Versions
 """
+1.8 - Added pre/post-VIF profiles and dynamic Screen profile, stock, and control settings.
 1.7 - Added core_bc to base profile
 1.6 - Dual index profile and config for 239X/INT, reduce redundant lines w/ base dicts.
 1.5 - M/M2+Spike (Spike = SHIV174M renamed)

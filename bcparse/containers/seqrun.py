@@ -126,8 +126,8 @@ represents one sequencing run after ingest has already produced SeqSamp
 children and a run-scoped normalized long-format dataframe.
 
 Construction:
- - ingest/parse_mode.py builds one SeqRun directly at the end of ParseMode.
- - ingest/compile_mode.py builds one SeqRun per run_id while materializing the
+ - modes/parse_mode.py builds one SeqRun directly at the end of ParseMode.
+ - modes/compile_mode.py builds one SeqRun per run_id while materializing the
    final RunSeries.
  - SeqRun does not own dataframe-to-run construction helpers; mode classes
    decide how samples are grouped and how run metadata is recovered.

@@ -104,8 +104,8 @@ class RunInfo:
         """
         Parse a raw runinfo Excel table into a RunInfo object.
         Called from:
-            - ingest/parse_mode.py
-            - ingest/compile_mode.py, for Analysis/Discovery workbook first sheets
+            - modes/parse_mode.py
+            - modes/compile_mode.py, for Analysis/Discovery workbook first sheets
         """
 
         # --- Preprocess, strip whitespace ---
@@ -495,9 +495,9 @@ RunInfo is the run-level metadata container used throughout parse and
 compile flows.
 
 Construction:
- - Parse mode reads runinfo.xlsx in ingest/parse_mode.py via RunInfo.from_table().
+ - Parse mode reads runinfo.xlsx in modes/parse_mode.py via RunInfo.from_table().
  - Compile mode reconstructs RunInfo from parse-workbook first sheets in
-   ingest/compile_mode.py via RunInfo.from_table().
+   modes/compile_mode.py via RunInfo.from_table().
  - SeqRun.ensure_runinfo() synthesizes RunInfo from long-format data via
    RunInfo.from_long_df() in compiled/base CSV inputs.
 

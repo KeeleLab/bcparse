@@ -2,8 +2,8 @@
 """
 Name:       parents.py
 Author:     CAG
-Version:    3.1.0
-Date:       20260623
+Version:    3.2.0
+Date:       20261110
 
 Consolidating qc functions for processing barcode data.
 These are used across the parse- and compile-side build pipelines.
@@ -120,7 +120,7 @@ def flag_putative_parents(
         r_seqs=n_seqs,
         r_counts=n_counts,
         req_parent_higher=True,
-        suffix_fn=_parent_suffix_sub,
+        suffix_fn=parent_suffix_sub,
     )
 
     # Query unique vs. named
@@ -152,7 +152,7 @@ def flag_putative_parents(
         r_seqs=n_seqs,
         r_counts=n_counts,
         req_parent_higher=False,
-        suffix_fn=_parent_suffix_sub,
+        suffix_fn=parent_suffix_sub,
     )
 
     # Build parent mapping dict
@@ -396,7 +396,7 @@ def _parent_suffix_core(parent_seq: str, child_seq: str) -> str:
     return "core"
 
 
-def _parent_suffix_sub(parent_seq: str, child_seq: str) -> str:
+def parent_suffix_sub(parent_seq: str, child_seq: str) -> str:
     """
     Return compact substitution suffix for parent->child, e.g. "5C_12A".
     """
@@ -419,6 +419,9 @@ def _parent_suffix_sub(parent_seq: str, child_seq: str) -> str:
 
 # %% Versions
 """
+v3.2.0 20261110
+ - Exposed parent_suffix_sub() for consistent distance-match reporting.
+
 v3.1.0 20260623
  - Fixed redundant parse mode logging by adding optional print_header arg flag_putative_parents()
  - cast() use because bk_trees has many possible return types.

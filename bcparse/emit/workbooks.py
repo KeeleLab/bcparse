@@ -2,8 +2,8 @@
 """
 Name:       workbooks.py
 Author:     CAG
-Version:    2.1.0
-Date:       20260623
+Version:    2.3.0
+Date:       20261110
 """
 
 # %% Imports
@@ -19,6 +19,60 @@ import bcparse.qc as qc
 from bcparse.containers.runseries import RunSeries
 from bcparse.containers.runinfo import RunInfo
 from bcparse.containers.seqrun import SeqRun
+
+# %% Screen workbook
+
+
+def write_screen_workbook(screen_run) -> str:
+    """Write run-level FASTQ profile and stock screening tables."""
+    out_path = screen_run.settings.out_path
+    os.makedirs(out_path, exist_ok=True)
+    workbook_path = os.path.join(out_path, f"{screen_run.output_stem}_Screen.xlsx")
+
+    with pd.ExcelWriter(workbook_path) as writer:
+        summary_tables = (
+            ("Read outcomes", screen_run.summary_df),
+            ("Profiles", screen_run.profiles_df),
+            ("Stocks", screen_run.stocks_df),
+            ("Ambiguous", screen_run.ambiguous_df),
+        )
+        startrow = 0
+        for title, table in summary_tables:
+            pd.DataFrame([[title]]).to_excel(
+                writer,
+                sheet_name="Summary",
+                startrow=startrow,
+                index=False,
+                header=False,
+            )
+            table.to_excel(
+                writer,
+                sheet_name="Summary",
+                startrow=startrow + 1,
+                index=False,
+            )
+            startrow += len(table) + 4
+
+        for profile, barcode_df in screen_run.barcode_dfs.items():
+            barcode_df.to_excel(
+                writer,
+                sheet_name=f"{profile} barcodes",
+                index=False,
+            )
+        screen_run.ambiguous_barcodes_df.to_excel(
+            writer,
+            sheet_name="Ambiguous barcodes",
+            index=False,
+        )
+
+        pd.DataFrame(screen_run.settings_rows(), columns=["setting", "value"]).to_excel(
+            writer,
+            sheet_name="Screen settings",
+            index=False,
+        )
+
+    return workbook_path
+
 
 # %% Parse workbook
 
@@ -381,6 +435,14 @@ def _build_above_cutoff_df(df: pd.DataFrame) -> pd.DataFrame:
 
 # %% Versions
 """
+v2.3.0 20261110
+ - Added per-profile and ambiguous long barcode sheets to Screen workbooks.
+ - Consolidated screen summary tables on one labeled worksheet.
+
+v2.2.0 20261110
+ - Added standalone Screen workbook output with summary, profile, stock,
+   ambiguity, and settings sheets.
+
 v2.1.0 20260623
  - accomodating source/sample_id meta for views.py update
 

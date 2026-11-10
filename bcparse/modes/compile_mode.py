@@ -892,10 +892,10 @@ class AnalysisWorkbookParser:
 """
 v1.0.0 20260625
     - Created as the linear compile-mode pipeline module.
-    - Combines former ingest/compile.py source normalization, sample-level
+    - Combines former modes/compile.py source normalization, sample-level
       deduplication, compile QC, RunSeries construction, and missing RunInfo
       synthesis machinery.
-    - Combines former ingest/xlsx.py parse-workbook discovery and parsing
+    - Combines former modes/xlsx.py parse-workbook discovery and parsing
       machinery.
     - Keeps workbook/csv emission outside CompileMode in __main__/emit.
 """

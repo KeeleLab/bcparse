@@ -1,5 +1,23 @@
 # CHANGELOG
 
+### [4.5.0] - FASTQ screen mode
+1. Added a standalone Screen mode for run-level read-profile and stock composition.
+2. Refactored FASTQ extraction around independently compiled `fq_profile_parser`
+   instances shared by Parse and Screen modes.
+3. Added `_Screen.xlsx` output with consolidated summary tables, per-profile
+   long barcode tables, explicit ambiguity reporting, and screen settings.
+4. Screen stock references now follow configured stocks dynamically, with explicit
+   239M, 239M2, and SHIV174 exclusions and Spike canonicalization.
+5. Added optional nearest-reference barcode matching with an exact-only default,
+   performed once per distinct profile/barcode sequence.
+6. Added Parse-style reference-match reporting: single exact matches remain
+   named, inexact matches become `Unique.N`, and tied matches become `Multi.N`.
+7. Added CLI and GUI Screen entry points with FASTQ and FASTQ.GZ support.
+8. Renamed the mode-orchestration package from `ingest` to `modes`.
+
+### [4.4.1] - pre/post-VIF profiles
+1. Added `preVIF_discover` and `postVIF_discover` parse profiles, read structure, and refs
+
 ### [4.4.0] - Barcode discovery profiles
 1. Added `M_discover` and `X_discover` parse profiles that extract and quantify
    barcodes without loading a stock barcode reference FASTA.
@@ -46,7 +64,7 @@ ergonomics, and code organization.
 Package structure
 - Flat utils/ layout replaced with bcparse/ package organized by domain:
   - containers/    runinfo, runseries, seqrun, seqsamp data models
-  - ingest/        parse_mode and compile_mode linear pipelines
+  - modes/         parse_mode, screen_mode, and compile_mode linear pipelines
   - emit/          views, workbooks output rendering
   - qc/            collapse, flags, identity, parents (split from qc_ops.py)
   - gui/           parse, compile (split from monolithic gui.py)

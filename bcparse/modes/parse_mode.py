@@ -2,8 +2,8 @@
 """
 Name:       parse_mode.py
 Author:     CAG
-Version:    1.0.0
-Date:       2026/06/25
+Version:    1.1.0
+Date:       2026/11/10
 
 Parse-mode pipeline for one FASTQ plus one runinfo workbook.
 
@@ -21,8 +21,8 @@ Major classes and helpers:
     stream_fastq / stream_to_countdict
         Read FASTQ records and collect observed index/barcode counts.
 
-    parse_fastq_rec
-        Extracts the target index and barcode sequences from one FASTQ record.
+    fq_profile_parser
+        Extracts target index and barcode sequences with precompiled profile patterns.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ import gzip
 from collections import defaultdict
 from importlib.metadata import version as package_version
 from pathlib import Path
-from typing import Any, Generator, Tuple, TypeAlias, cast
+from typing import Any, Generator, Tuple, TypeAlias
 
 import pandas as pd
 import regex
@@ -669,19 +669,15 @@ class ParseMode:
 
 def stream_to_countdict(settings: dict):
     """
-    Use stream_fastq() and parse_fastq_rec class to collect {idx:{bc:count}}
+    Use stream_fastq() and fq_profile_parser to collect {idx:{bc:count}}
     """
     res_pfq = {}
 
-    # Initialize search patterns
-    parse_fastq_rec.init_patterns(settings)
+    # Initialize search patterns for selected profile
+    profile_parser = fq_profile_parser(settings)
 
     for _, seq, _, qual in stream_fastq(settings["sample_path"]):
-        res = parse_fastq_rec(
-            seq=seq,
-            qual=qual,
-            settings=settings,
-        )
+        res = profile_parser.parse(seq=seq, qual=qual)
 
         # Ignore read if barcode is missing or low mean q
         if not hasattr(res, "bc_seq") or res.bc_qual < settings["mean_qual"]:
@@ -772,10 +768,15 @@ def mean_q(quals: list[int]) -> float:
     return 0.0 if not quals else sum(quals) / len(quals)
 
 
-class parse_fastq_rec(object):
+class fq_parsed_rec:
     """
-    Class to handle each fastq record as an instance while it streams.
-    Return per-read idx (named if expected), bc, and assoc mean qualities.
+    Hold extracted sequences and associated mean qualities for one FASTQ record.
+
+    Final attrs:
+    - seq, qual
+    - p5_seq, p5_qual
+    - bc_seq, bc_qual
+    - (Opt) p7_seq, p7_qual
     """
 
     __slots__ = (
@@ -789,119 +790,127 @@ class parse_fastq_rec(object):
         "p7_qual",
     )
 
-    # Class-level constants — built once, shared globally
-    _RC_TABLE = None
-    _PAT_P5 = None
-    _PAT_P7 = None
-    _PAT_BC = None
+    p5_seq: str
+    p5_qual: float
+    bc_seq: str
+    bc_qual: float
+    p7_seq: str
+    p7_qual: float
 
-    @classmethod
-    def init_patterns(cls, settings: dict):
+    def __init__(self, *, seq: str, qual: list[int]) -> None:
+        self.seq = seq
+        self.qual = qual
+
+
+class fq_profile_parser:
+    """
+    Handle each FASTQ record as it streams using one precompiled read profile.
+    Return per-read idx, bc, and associated mean qualities.
+    """
+
+    # Reverse-complement table — built once and shared across parser instances
+    _RC_TABLE = str.maketrans(
+        {"A": "T", "C": "G", "G": "C", "T": "A", "N": "N", "X": "X"}
+    )
+
+    def __init__(self, settings: dict) -> None:
         """
         Call once before streaming to precompile fuzzy patterns.
         This is much faster.
         """
+        self.settings = settings.copy()
 
         # Get allowed mismatches
-        mm = settings["mismatches"]
+        mm = int(self.settings["mismatches"])
 
-        # compile regex patterns once; BESTMATCH yields the minimal-edit match
-        cls._PAT_P5 = regex.compile(
-            rf"(?:{regex.escape(settings['ref_p5'])}){{s<={mm}}}"  # FYI, e<={mm} & flags=regex.BESTMATCH takes somewhat longer but may be cleaner...
+        # Compile regex patterns once per read profile
+        self.pat_p5 = regex.compile(
+            rf"(?:{regex.escape(self.settings['ref_p5'])}){{s<={mm}}}"  # FYI, e<={mm} & flags=regex.BESTMATCH takes somewhat longer but may be cleaner...
         )
-
-        cls._PAT_BC = regex.compile(
-            rf"(?:{regex.escape(settings['ref_bc'])}){{s<={mm}}}"
+        self.pat_bc = regex.compile(
+            rf"(?:{regex.escape(self.settings['ref_bc'])}){{s<={mm}}}"
         )
-
-        if settings.get("dualindex"):
-            cls._PAT_P7 = regex.compile(
-                rf"(?:{regex.escape(settings['ref_p7'])}){{s<={mm}}}"
+        self.pat_p7 = None
+        if self.settings.get("dualindex"):
+            self.pat_p7 = regex.compile(
+                rf"(?:{regex.escape(self.settings['ref_p7'])}){{s<={mm}}}"
             )
 
-    def __init__(
-        self,
-        seq: str,
-        qual: str,
-        settings: dict,
-    ):
+    def parse(self, *, seq: str, qual: str) -> fq_parsed_rec:
+        """
+        Extract regions of interest and associated quality strings.
+        """
+        settings = self.settings
 
         # Initialize sequence and quality
-        self.seq = seq
-        self.qual = self.Q33conv(qual)
+        result = fq_parsed_rec(seq=seq, qual=self.Q33conv(qual))
 
         # (Opt) mask lowQ bases
         if settings["mask"]:
-            self.seq = "".join(
-                "N" if q < settings["mask_qual"] else b
-                for b, q in zip(self.seq, self.qual)
+            result.seq = "".join(
+                "N" if q < settings["mask_qual"] else base
+                for base, q in zip(result.seq, result.qual)
             )
 
-        # Process the fastq record according to settings
-        self.process_sequence(settings)
-
-    def process_sequence(self, settings):
-        """
-        Extract regions of interest and assoc. quality strings and update class attrs.
-        Final attrs:
-        - seq, qual
-        - p5_seq, p5_qual
-        - bc_seq, bc_qual
-        - (Opt) p7_seq, p7_qual
-        """
         # Extract p5 index
         p5 = self.match_extract_single_targ(
-            seq=self.seq,
-            qual=self.qual,
-            pat=cast("regex.Pattern", parse_fastq_rec._PAT_P5),
+            seq=result.seq,
+            qual=result.qual,
+            pat=self.pat_p5,
             targ_dir=settings["tdir_p5"],
             targ_len=settings["tlen_p5"],
         )
 
+        # Exit if p5 is missing
+        if not p5[0]:
+            return result
+
         # If p5 found, set attrs and continue
-        if p5[0]:
-            self.p5_seq, self.p5_qual = p5[0], mean_q(p5[1])
+        result.p5_seq, result.p5_qual = p5[0], mean_q(p5[1])
 
-            # Reverse complement if called
-            if settings["rdir"] == "rev":
-                self.seq = self.revcomp(self.seq)
-                self.qual = self.qual[::-1]
+        # Reverse complement if called
+        if settings["rdir"] == "rev":
+            result.seq = self.revcomp(result.seq)
+            result.qual = result.qual[::-1]
 
-            # Process as single or dual index
-            if not settings["dualindex"]:
-                self.process_single_index(settings)
-            else:
-                self.process_dual_index(settings)
+        # Process as single or dual index
+        if not settings["dualindex"]:
+            self._process_single_index(result)
+        else:
+            self._process_dual_index(result)
+        return result
 
-    def process_single_index(self, settings):
+    def _process_single_index(self, result: fq_parsed_rec) -> None:
         """
-        Obtain barcode based on target and length
+        Obtain barcode based on target and length.
         """
+        settings = self.settings
+
         # Extract barcode for single index
         bc = self.match_extract_single_targ(
-            seq=self.seq,
-            qual=self.qual,
-            pat=cast("regex.Pattern", parse_fastq_rec._PAT_BC),
+            seq=result.seq,
+            qual=result.qual,
+            pat=self.pat_bc,
             targ_dir=settings["tdir_bc"],
             targ_len=settings["tlen_bc"],
         )
-
         if bc[0]:
-            self.bc_seq, self.bc_qual = bc[0], mean_q(bc[1])
+            result.bc_seq, result.bc_qual = bc[0], mean_q(bc[1])
 
-    def process_dual_index(self, settings):
+    def _process_dual_index(self, result: fq_parsed_rec) -> None:
         """
         Obtain p7, and if present obtain barcode based on two targets to
         facilitate optional repair of short barcode, given tlen_bc and a fill sequence.
         """
-        # Get di_profile
-        base_profile = settings.get("base_profile")
+        settings = self.settings
+        if self.pat_p7 is None:
+            raise RuntimeError("Dual-index parser is missing its P7 pattern.")
 
         # Extract p7 index
         p7 = self.match_extract_single_targ(
-            seq=self.seq,
-            qual=self.qual,
-            pat=cast("regex.Pattern", parse_fastq_rec._PAT_P7),
+            seq=result.seq,
+            qual=result.qual,
+            pat=self.pat_p7,
             targ_dir=settings["tdir_p7"],
             targ_len=settings["tlen_p7"],
         )
@@ -911,54 +920,48 @@ class parse_fastq_rec(object):
             return
 
         # If found, set attrs and continue
-        self.p7_seq, self.p7_qual = p7[0], mean_q(p7[1])
+        result.p7_seq, result.p7_qual = p7[0], mean_q(p7[1])
 
-        # Finish based on di_profile
+        # Finish based on base profile
         # Extract barcode for dual index:
-
-        if base_profile == "X":
+        if settings.get("base_profile") == "X":
             # `X` has a long amplicon, just extract downstream from (pre-compiled) ref_bc. Also...
             bc = self.match_extract_single_targ(
-                seq=self.seq,
-                qual=self.qual,
-                pat=cast("regex.Pattern", parse_fastq_rec._PAT_BC),
+                seq=result.seq,
+                qual=result.qual,
+                pat=self.pat_bc,
                 targ_dir=settings["tdir_bc"],
                 targ_len=settings["tlen_bc"],
             )
             # The X/INT p7 seq is revcomp, but bc is forward. I don't like this fix, but it works.
-            self.p7_seq = self.revcomp(self.p7_seq)
-
+            result.p7_seq = self.revcomp(result.p7_seq)
         else:
-            bc = self.match_extract_dual_targ(  # `M`s are flanked by PAT_P7 and PAT_BC, cut between
-                seq=self.seq,
-                qual=self.qual,
-                pat1=cast("regex.Pattern", parse_fastq_rec._PAT_P7),
-                pat2=cast("regex.Pattern", parse_fastq_rec._PAT_BC),
+            # `M`s are flanked by PAT_P7 and PAT_BC, cut between
+            bc = self.match_extract_dual_targ(
+                seq=result.seq,
+                qual=result.qual,
+                pat1=self.pat_p7,
+                pat2=self.pat_bc,
                 targ_len=settings["tlen_bc"],
                 fill_seq=settings["fill_seq"],
             )
 
         if bc[0]:
-            self.bc_seq, self.bc_qual = bc[0], mean_q(bc[1])
+            result.bc_seq, result.bc_qual = bc[0], mean_q(bc[1])
 
     @staticmethod
-    def Q33conv(qual: str):
+    def Q33conv(qual: str) -> list[int]:
         """
         Convert a string of Q33 ascii characters into a list of PHRED scores.
         """
         return [ord(q) - 33 for q in qual]
 
-    @staticmethod
-    def revcomp(seq: str):
+    @classmethod
+    def revcomp(cls, seq: str) -> str:
         """
         Returns the reverse complement of a DNA sequence.
-        Lazily initialize the RC table if needed.
         """
-        if parse_fastq_rec._RC_TABLE is None:
-            parse_fastq_rec._RC_TABLE = str.maketrans(
-                {"A": "T", "C": "G", "G": "C", "T": "A", "N": "N", "X": "X"}
-            )
-        return seq.translate(parse_fastq_rec._RC_TABLE)[::-1]
+        return seq.translate(cls._RC_TABLE)[::-1]
 
     @staticmethod
     def match_extract_single_targ(
@@ -1030,11 +1033,17 @@ class parse_fastq_rec(object):
 
 # %% versions
 """
+v1.1.0 20261110
+    - Split FASTQ profile parsing from per-record parsed results as
+      fq_profile_parser and fq_parsed_rec.
+    - Moved compiled target patterns to parser-instance state so Parse and
+      Screen can reuse extraction behavior across independent profiles.
+
 v1.0.0 20260625
     - Created as the linear parse-mode pipeline module.
-    - Combines former ingest/countdict.py reference-loading, count-dict,
+    - Combines former modes/countdict.py reference-loading, count-dict,
       dataframe, runinfo-merge, QC, and SeqRun construction machinery.
-    - Combines former ingest/fastq.py FASTQ streaming and per-record parsing
+    - Combines former modes/fastq.py FASTQ streaming and per-record parsing
       machinery.
     - Keeps workbook/csv emission outside ParseMode in __main__/emit.
 """

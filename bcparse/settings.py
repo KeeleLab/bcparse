@@ -2,11 +2,11 @@
 """
 Name:       settings.py
 Author:     CAG
-Version:    1.0 
-Date:       2026/05/26
+Version:    1.1
+Date:       2026/11/10
 
 Description:
-    This module defines dataclasses to hold settings for parse and compile modes. 
+    This module defines dataclasses to hold settings for parse and compile modes.
     Descriptions are redundant with CLI args, but this structure allows for easier management of settings and validation.
 """
 
@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass
 
 @dataclass
 class ParseSettings:
-    
+
     # Required
     sample_path:    str = ""    # Path to run.fastq
     runinfo_path:   str = ""    # Path to runinfo.xlsx
@@ -57,6 +57,44 @@ class ParseSettings:
 
 
 @dataclass
+class ScreenSettings:
+
+    # Required
+    sample_path: str = ""       # Path to run.fastq
+    out_path: str = ""          # Path to output directory
+    # Optional
+    mean_qual: int = 30          # Minimum mean quality for extracted targets
+    mismatches: int = 1          # Allowed substitutions in structural anchors
+    dist_threshold: int = 0      # Barcode-to-reference ldist threshold
+    mask: bool = False           # Mask low-quality bases before matching
+    mask_qual: int = 20          # Quality threshold for masking bases
+
+    @classmethod
+    def from_mapping(cls, values: dict) -> "ScreenSettings":
+        defaults = cls()
+        return cls(
+            **{
+                key: values.get(key, getattr(defaults, key))
+                for key in cls.__annotations__
+            }
+        )
+
+    def validate(self) -> None:
+        required = ["sample_path", "out_path"]
+        missing = [field for field in required if not getattr(self, field)]
+        if missing:
+            raise ValueError(
+                "Error: screen mode requires --sample_path and --out_path, "
+                "or use --screen --gui."
+            )
+        if self.dist_threshold < 0:
+            raise ValueError("Error: dist_threshold must be zero or greater.")
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class CompileSettings:
 
     # Required
@@ -64,14 +102,13 @@ class CompileSettings:
     out_path:       str = ""    # Path to output directory
     out_prefix:     str = ""    # Prefix for output files (e.g. 'run1' to produce run1_compiled.csv)
     # Optional
-    base_csv_path:      str | None = None    # Optional path to base CSV for merging with compiled data. 
+    base_csv_path:      str | None = None    # Optional path to base CSV for merging with compiled data.
     ldist_samp_lvl:     bool = False    # Rerun samp-lvl ldist
     ldist_group_lvl:    bool = False    # Run group-lvl ldist
     contam_check:       bool = False    # Run series ldist-based contamination check
     dist_threshold:     int = 1         # ldist to flag
     collapse_to_parent: bool = True     # Collapse ldist children to parent rows
 
-    # Helper methods for manual CLI ingestion and validation
     @classmethod
     def from_mapping(cls, values: dict) -> "CompileSettings":
         defaults = cls()
@@ -92,5 +129,8 @@ class CompileSettings:
 
 #%% Versions
 """
+v1.1 20261110
+- Added ScreenSettings with screen-specific validation and defaults.
+
 v1.0: Initial version with ParseSettings and CompileSettings dataclasses, including validation and dict conversion methods.
 """
