@@ -25,42 +25,174 @@ The package includes the reference FASTA and primer CSV files in `bcparse/ref/`,
 
 `bcparse` requires Python `>=3.13`.
 
-We highly recommend uv package management:
+[`uv`](https://docs.astral.sh/uv/) is the HIGHLY recommended installer, as it creates an isolated environment for `bcparse` and automatically downloads a compatible Python version and associated packages.
+
+Installing directly from GitHub also requires Git.
+
+### macOS and Linux
+
+Install Homebrew (optional)
+
+Homebrew can install both `uv` and Git.
 
 ```bash
-# Standard
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# Install it with the official script:
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
 
-# Or via homebrew
+Follow the installer's printed instructions to add Homebrew to your shell, then
+open a new terminal and verify the installation:
+
+```bash
+brew --version
+```
+
+Install `uv`
+
+```bash
+# With Homebrew, if available
 brew install uv
+
+# Or with the standalone installer:
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-From a local checkout:
+Install `git`
 
 ```bash
-cd path/to/bcparse
+# Check first
+git --version
 
-# From top level
-uv tool install .
+# With Homebrew, if available
+brew install git
 
-# Or...
-pipx install .
-
-# Or...
-pip install .
-
-# To update, reinstall with --force (uv, pipx) or --upgrade (pip).
+# Or via Apple's native CLI tools:
+xcode-select --install
 ```
 
-Install directly from GitHub:
+Install `bcparse`
 
 ```bash
+# Directly with git, if available
+git --version
 uv tool install git+https://github.com/KeeleLab/bcparse.git
+
+# Or from a local download/checkout (Click `Code` > Download Zip > decompress)
+cd path/to/bcparse
+uv tool install .
+```
+
+### Windows
+
+Install `uv`
+
+```powershell
+# With WinGet, if available
+winget install --id=astral-sh.uv -e
+
+# Or with the standalone installer:
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Install `git`
+
+```powershell
+# Check first
+git --version
+
+# With WinGet, if available
+winget install --id Git.Git -e
+```
+
+Alternatively, download and run the installer from the
+[official Git for Windows page](https://git-scm.com/download/win).
+
+Close and reopen PowerShell after installing `uv` or Git.
+
+Install `bcparse`
+
+```powershell
+# Directly with git, if available
+git --version
+uv tool install git+https://github.com/KeeleLab/bcparse.git
+
+# Or from a local download/checkout (Click `Code` > Download Zip > decompress)
+cd path\to\bcparse
+uv tool install .
+```
+
+On Windows, RapidFuzz also requires the
+[Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist).
+It is commonly already installed, but a missing runtime can cause a
+`DLL load failed` error when `bcparse` starts.
+
+### Updating an existing installation
+
+Use `--force` to replace the currently installed `bcparse` tool:
+
+```bash
+uv tool install --force git+https://github.com/KeeleLab/bcparse.git
+```
+
+### Institutional networks and system certificates
+
+By default, `uv` uses its bundled certificate authorities. If installation
+fails with a certificate or package-fetch error on an institutional network,
+retry with `--system-certs` so `uv` uses certificates trusted by the operating
+system:
+
+```bash
+uv tool install --system-certs git+https://github.com/KeeleLab/bcparse.git
+```
+
+Combine it with `--force` when replacing an existing installation:
+
+```bash
+uv tool install --force --system-certs git+https://github.com/KeeleLab/bcparse.git
+```
+
+### Specific versions and local checkouts
+
+Install a specific tag, branch, or commit by appending its Git reference:
+
+```bash
+uv tool install git+https://github.com/KeeleLab/bcparse.git@v4.5.0
+```
+
+Install from the top level of a local checkout with:
+
+
+
+### Alternative installers
+
+`pipx` and `pip` also work, but unlike `uv` they require a compatible Python
+`>=3.13` installation + required dependencies to already be available.
+
+Dependencies:
+- Python>=3.13
+- numpy>=2.4.6
+- openpyxl>=3.1.5
+- pandas>=3.0.3
+- rapidfuzz>=3.14.5
+- regex>=2026.5.9
+- tqdm>=4.68.3
+
+With `pipx`:
+
+```bash
 pipx install git+https://github.com/KeeleLab/bcparse.git
+
+# Replace an existing installation:
+pipx install --force git+https://github.com/KeeleLab/bcparse.git
+```
+
+With `pip`:
+
+```bash
 pip install git+https://github.com/KeeleLab/bcparse.git
 
-# For a specific tag, branch, or commit:
-uv tool install git+https://github.com/KeeleLab/bcparse.git@v4.5.0
+# Upgrade an existing installation:
+pip install --upgrade git+https://github.com/KeeleLab/bcparse.git
 ```
 
 Once installed, `bcparse` can be run from any directory:
@@ -179,8 +311,6 @@ Outputs:
 Configured stock profiles currently include:
 
 ```text
-M_discover
-X_discover
 239M
 239M2
 239X/INT
@@ -197,17 +327,21 @@ SHIV_1051M
 SHIV_1054M
 SL8_239M
 TAT_SL8
+M_discover
+X_discover
+preVIF_discover
+postVIF_discover
 ```
 
 Reference data is prepackaged in this repo.
 
 ### Barcode Discovery
 
-`M_discover` and `X_discover` use the corresponding M or X extraction profile
-without loading a stock barcode reference FASTA. Exact barcode sequences are
-ranked across the run as uppercase `BC.1`, `BC.2`, and so on. Count ties are
-resolved by sequence, and the same sequence keeps the same `BC.N` name in every
-sample from that run.
+`M_discover`, `X_discover`, `preVIF_discover`, and `postVIF_discover` use the
+corresponding M, X, pre-VIF, or post-VIF extraction profile without loading a
+stock barcode reference FASTA. Exact barcode sequences are ranked across the
+run as uppercase `BC.1`, `BC.2`, and so on. Count ties are resolved by sequence,
+and the same sequence keeps the same `BC.N` name in every sample from that run.
 
 Discovery barcodes participate in the normal per-sample full-sequence distance
 checks. `BC.N` numbering is local to one run; use `bc_seq`, not the rank label,
@@ -234,26 +368,27 @@ targets and primer paths are still required.
 ### Runinfo Workbook
 
 Parse mode expects a 'runinfo.xlsx' Excel file matching this legacy format.
+These colums are **required**, but additional columns are allowed and passed through to final data.
 
 | Run Number              | Animal | Sample              | Date       | Barcodes | Input TOTAL PER BARCODE | Input TOTAL PER WELL |     | (F Barcode) | (cDNA) | Etc |
 | ----------------------- | ------ | ------------------- | ---------- | -------- | ----------------------- | -------------------- | --- | ----------- | ------ | --- |
 | MS3663441-300V2         | ML63   | 2WPI.Plasma.cDNA    | 2023-07-03 | P5.1     | 20000                   | 10000                |     | P7.39       | SL8R   |     |
 |                         | RM07   | 30.Plasma.cDNA      | 2024-09-18 | P5.2     | 20000                   | 10000                |     | P7.39       | SL8R   |     |
 |                         | RM07   | 53.PBMC.VifAluF.DNA | 2024-09-18 | P5.3     | 20000                   | 10000                |     | P7.39       | NA     |     |
-|                         |        |                     |            |          |                         |                      |     |             |        |     |
-|                         |        |                     |            |          |                         |                      |     |             |        |     |
-|                         |        |                     |            |          |                         |                      |     |             |        |     |
-|                         |        |                     |            |          |                         |                      |     |             |        |     |
+|-                        |        |                     |            |          |                         |                      |     |             |        |     |
+|-                        |        |                     |            |          |                         |                      |     |             |        |     |
+|-                        |        |                     |            |          |                         |                      |     |             |        |     |
+|-                        |        |                     |            |          |                         |                      |     |             |        |     |
 | Run Name                |        |                     |            |          |                         |                      |     |             |        |     |
 | P7newIndex2-test-011325 |        |                     |            |          |                         |                      |     |             |        |     |
-|                         |        |                     |            |          |                         |                      |     |             |        |     |
+|-                        |        |                     |            |          |                         |                      |     |             |        |     |
 | Date                    |        |                     |            |          |                         |                      |     |             |        |     |
 | 1/13/25                 |        |                     |            |          |                         |                      |     |             |        |     |
-|                         |        |                     |            |          |                         |                      |     |             |        |     |
+|-                        |        |                     |            |          |                         |                      |     |             |        |     |
 | Regular Taq             |        |                     |            |          |                         |                      |     |             |        |     |
 | 300-V2 Nano Kit         |        |                     |            |          |                         |                      |     |             |        |     |
 | VPX                     |        |                     |            |          |                         |                      |     |             |        |     |
-|                         |        |                     |            |          |                         |                      |     |             |        |     |
+|-                        |        |                     |            |          |                         |                      |     |             |        |     |
 | One-way                 |        |                     |            |          |                         |                      |     |             |        |     |
 This runinfo format is required.
 
@@ -273,9 +408,6 @@ This runinfo format is required.
     - It is used to calculate barcode abundance cutoffs.
 
 - `Input TOTAL PER WELL` and `(cDNA)` are accepted for compatibility but are not used by `bcparse`.
-
-- Additional metadata columns may be added after the required columns.
-    - These columns are passed through to the output runinfo sheet.
 
 ## Screen Mode
 
